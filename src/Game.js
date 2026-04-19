@@ -13,6 +13,7 @@ const TILE_SIZE = 64;
 const MAP_WIDTH = 40;
 const MAP_HEIGHT = 40;
 const GAME_OVER_DELAY = 2000;
+const MAX_LEVEL = 10;
 
 export class Game {
     constructor(canvas) {
@@ -33,6 +34,9 @@ export class Game {
         this.gameOverIsWin = false;
         this.coinsCollected = 0;
         this.enemiesKilled = 0;
+        
+        // Уровень
+        this.currentLevel = 1;
         
         // Оружие
         this.weapon = {
@@ -94,6 +98,13 @@ export class Game {
         this.lastTime = 0;
         this.deltaTime = 0;
         
+        // Результат генерации уровня (для респауна)
+        this.spawnResult = null;
+        
+        // Триггер звука для ИИ врагов
+        this.soundTrigger = null;
+        this.soundTriggerTimer = 0;
+        
         // Настройка слушателей событий
         this.setupEventListeners();
     }
@@ -114,21 +125,30 @@ export class Game {
                 self.audioManager.init();
             }
             
-            // Стрельба
-            if ((e.code === 'Space' || e.code === 'Digit1') && !self.isGameOver) {
-                self.shoot();
+            // Перезарядка (только когда не Game Over)
+            if (e.code === 'KeyR' && !self.isGameOver) {
+                self.reloadWeapon();
             }
             
-            // Перезарядка или рестарт
-            if (e.code === 'KeyR') {
-                if (self.isGameOver) {
-                    const timeSinceDeath = Date.now() - self.gameOverTime;
-                    if (timeSinceDeath >= GAME_OVER_DELAY) {
-                        self.restartGame();
+            // Респаун/рестарт/переход (только когда Game Over)
+            if (self.isGameOver) {
+                const timeSinceDeath = Date.now() - self.gameOverTime;
+                if (timeSinceDeath >= GAME_OVER_DELAY) {
+                    if (e.code === 'Enter' || e.code === 'Space' || e.code === 'Digit1') {
+                        if (self.gameOverIsWin) {
+                            // При победе - следующий уровень
+                            self.nextLevel();
+                        } else {
+                            // При смерти - респаун на том же уровне
+                            self.respawnPlayer();
+                        }
                     }
-                } else {
-                    self.reloadWeapon();
                 }
+            }
+            
+            // Стрельба (только когда не Game Over)
+            if (!self.isGameOver && (e.code === 'Digit1')) {
+                self.shoot();
             }
         });
         
@@ -161,7 +181,13 @@ export class Game {
                 if (self.isGameOver) {
                     const timeSinceDeath = Date.now() - self.gameOverTime;
                     if (timeSinceDeath >= GAME_OVER_DELAY) {
-                        self.restartGame();
+                        if (self.gameOverIsWin) {
+                            // При победе - следующий уровень
+                            self.nextLevel();
+                        } else {
+                            // При смерти - респаун на том же уровне
+                            self.respawnPlayer();
+                        }
                     }
                 } else {
                     self.shoot();
@@ -187,12 +213,37 @@ export class Game {
     }
     
     /**
-     * Инициализация и генерация первого уровня
+     * Расчет количества комнат для текущего уровня
+     */
+    getRoomCountForLevel(level) {
+        // Уровень 1: 5 комнат,Level 10: 22 комнаты (максимум)
+        const minRooms = 5;
+        const maxRooms = 22;
+        const roomIncrease = Math.min(level, Math.floor((maxRooms - minRooms) / 2));
+        return minRooms + roomIncrease;
+    }
+    
+    /**
+     * Расчет количества врагов на комнату для текущего уровня
+     */
+    getEnemiesPerRoomForLevel(level) {
+        // Уровень 1: 1-2 врага, Уровень 10: 5-6 врагов
+        const minEnemies = 1;
+        const maxEnemies = 6;
+        const enemyIncrease = Math.min(level - 1, Math.floor((maxEnemies - minEnemies) / 2));
+        return minEnemies + enemyIncrease;
+    }
+    
+    /**
+     * Инициализация и генерация уровня с учетом текущего уровня сложности
      */
     generateLevel() {
-        const result = this.mapGenerator.generateLevel(this.player.radius);
+        const result = this.mapGenerator.generateLevel(this.player.radius, this.currentLevel);
         this.MAP = this.mapGenerator.getMap();
         this.rooms = this.mapGenerator.getRooms();
+        
+        // Сохраняем результат для респауна
+        this.spawnResult = result;
         
         // Устанавливаем позицию игрока
         this.player.x = result.spawnPos.x;
@@ -208,7 +259,7 @@ export class Game {
         // Спавним врагов, лут и монеты
         this.spawnEntities();
         
-        console.log(`Уровень сгенерирован: ${this.rooms.length} комнат`);
+        console.log(`Уровень ${this.currentLevel}: сгенерировано ${this.rooms.length} комнат`);
     }
     
     /**
@@ -219,16 +270,28 @@ export class Game {
         this.loot = [];
         this.coins = [];
         
-        // Спавн врагов (2-4 на комнату, кроме первой)
+        // Спавн врагов (количество зависит от уровня, кроме первой комнаты)
+        // Уровень 1: 1-2 врага, Уровень 10: 5-6 врагов на комнату
+        const enemiesPerRoom = this.getEnemiesPerRoomForLevel(this.currentLevel);
         for (let i = 1; i < this.rooms.length; i++) {
             const room = this.rooms[i];
-            const numEnemies = Math.floor(Math.random() * 3) + 2;
+            const numEnemies = Math.floor(Math.random() * 2) + enemiesPerRoom;
             
             for (let j = 0; j < numEnemies; j++) {
                 const pos = this.findRandomPositionInRoom(room);
                 // Увеличена минимальная дистанция до TILE_SIZE * 5 для безопасности спавна
                 if (pos && pos.distToPlayer > TILE_SIZE * 5) {
-                    const enemy = new Enemy(pos.x, pos.y);
+                    // Распределение: 50% normal, 30% coward, 20% assault
+                    const rand = Math.random();
+                    let type;
+                    if (rand < 0.5) {
+                        type = 'normal';
+                    } else if (rand < 0.8) {
+                        type = 'coward';
+                    } else {
+                        type = 'assault';
+                    }
+                    const enemy = new Enemy(pos.x, pos.y, type);
                     this.enemies.push(enemy);
                 }
             }
@@ -362,7 +425,14 @@ export class Game {
         this.weapon.isShooting = true;
         this.weapon.shootTimer = 15;
         this.weapon.recoil = 20;
+        
+        // Активация тряски камеры для отдачи оружия
+        this.renderer.activateWeaponRecoilShake(1000, 15);
 
+        // Триггер звука для ИИ врагов
+        this.soundTrigger = { x: this.player.x, y: this.player.y };
+        this.soundTriggerTimer = 2000; // Звук слышен в течение 2 секунд
+        
         // Поиск ближайшего врага
         this.checkShootHit();
     }
@@ -542,7 +612,7 @@ export class Game {
                 } else {
                     const r = Math.random();
                     let numMedkits = 0;
-                    if (r < 0.8) numMedkits = 0;
+                    if (r < 0.6) numMedkits = 0;
                     else if (r < 0.95) numMedkits = 1;
                     else if (r < 0.98) numMedkits = 2;
                     else numMedkits = 3;
@@ -566,12 +636,80 @@ export class Game {
                     if (validRoomIndex !== -1) {
                         const pos = this.findRandomPositionInRoom(this.rooms[validRoomIndex]);
                         if (pos) {
-                            this.enemies.push(new Enemy(pos.x, pos.y));
+                            // Спавним врага случайного типа
+                            const types = ['normal', 'normal', 'normal', 'coward', 'assault'];
+                            const type = types[Math.floor(Math.random() * types.length)];
+                            this.enemies.push(new Enemy(pos.x, pos.y, type));
                         }
                     }
                 }, 1000);
             }
         }
+    }
+    
+    /**
+     * Респаун игрока после смерти на том же уровне
+     * Сохраняет геометрию комнат, но заново расставляет врагов, монеты и аптечки
+     */
+    respawnPlayer() {
+        console.log(`🔄 Респаун игрока на уровне ${this.currentLevel}...`);
+        
+        // Очищаем всех текущих врагов, лут и монеты (старие объекты удаляются)
+        this.enemies = [];
+        this.loot = [];
+        this.coins = [];
+        
+        // Восстанавливаем позицию игрока на спавн
+        if (this.spawnResult) {
+            this.player.x = this.spawnResult.spawnPos.x;
+            this.player.y = this.spawnResult.spawnPos.y;
+        }
+        
+        // Восстанавливаем угол обзора
+        this.player.angle = 0;
+        
+        // Полный сброс состояния игрока
+        this.player.reset();
+        
+        // Восстанавливаем HP до максимума
+        this.player.health = this.player.maxHealth;
+        
+        // Восстанавливаем патроны
+        this.weapon.ammo = this.weapon.maxAmmo;
+        this.weapon.isReloading = false;
+        this.weapon.reloadTimer = 0;
+        
+        // Сброс состояний оружия
+        this.weapon.isShooting = false;
+        this.weapon.shootTimer = 0;
+        this.weapon.recoil = 0;
+        
+        // Устанавливаем таймер неуязвимости
+        this.safeTimer = this.safeDuration;
+        
+        // Сбрасываем таймер авторегенерации
+        this.regenTimer = 0;
+        this.lastDamageTime = Date.now();
+        this.regenStarted = false;
+        
+        // Сбрасываем счетчики
+        this.coinsCollected = 0;
+        this.enemiesKilled = 0;
+        
+        // Снимаем экран Game Over
+        this.isGameOver = false;
+        this.gameOverTime = 0;
+        this.gameOverIsWin = false;
+        
+        // Переспаиваем все объекты на карте
+        this.spawnEntities();
+        
+        // Выходим из pointer lock
+        if (document.pointerLockElement === this.canvas) {
+            document.exitPointerLock();
+        }
+        
+        console.log(`✅ Респаун завершён! Врагов: ${this.enemies.length}, аптечек: ${this.loot.length}, монет: ${this.coins.length}`);
     }
     
     /**
@@ -585,6 +723,7 @@ export class Game {
         this.lastReloadLoopTime = 0;
         
         this.audioManager.playReloadStartSound();
+        this.renderer.activateReloadShake(1665, 4); // 1.665s = 300 frames at ~180fps
         console.log('Перезарядка...');
     }
     
@@ -632,23 +771,44 @@ export class Game {
         this.gameOverTime = Date.now();
         this.gameOverIsWin = false;
         
+        // Остановка тряски камеры
+        this.renderer.damageShake.active = false;
+        this.renderer.weaponShake.active = false;
+        this.renderer.damageShake.offsetX = 0;
+        this.renderer.damageShake.offsetY = 0;
+        this.renderer.weaponShake.offsetX = 0;
+        this.renderer.weaponShake.offsetY = 0;
+        
         if (document.pointerLockElement === this.canvas) {
             document.exitPointerLock();
         }
     }
     
     /**
-     * Победа
+     * Победа / Переход на следующий уровень
      */
     gameOverWin() {
         this.isGameOver = true;
         this.gameOverTime = Date.now();
         this.gameOverIsWin = true;
         
+        // Остановка тряски камеры
+        this.renderer.damageShake.active = false;
+        this.renderer.weaponShake.active = false;
+        this.renderer.damageShake.offsetX = 0;
+        this.renderer.damageShake.offsetY = 0;
+        this.renderer.weaponShake.offsetX = 0;
+        this.renderer.weaponShake.offsetY = 0;
+        
         if (document.pointerLockElement === this.canvas) {
             document.exitPointerLock();
         }
-        console.log('Победа! Все монеты собраны!');
+        
+        if (this.currentLevel >= MAX_LEVEL) {
+            console.log(`🏆 ПОЛНАЯ ПОБЕДА! Пройдено уровней: ${this.currentLevel}!`);
+        } else {
+            console.log(`✅ Уровень ${this.currentLevel} пройден!`);
+        }
     }
     
     /**
@@ -722,11 +882,17 @@ export class Game {
             }
             this.controllerData.lastReload = this.controllerData.bButton;
             
-            // Обработка рестарта от A (в меню Game Over)
-            if (this.isGameOver && this.controllerData.aButton) {
+            // Обработка перехода/респауна от A (в меню Game Over)
+            if (this.isGameOver && this.controllerData.aButton && !this.controllerData.lastRestart) {
                 const timeSinceDeath = Date.now() - this.gameOverTime;
                 if (timeSinceDeath >= GAME_OVER_DELAY) {
-                    this.restartGame();
+                    if (this.gameOverIsWin) {
+                        // При победе - следующий уровень
+                        this.nextLevel();
+                    } else {
+                        // При смерти - респаун на том же уровне
+                        this.respawnPlayer();
+                    }
                 }
             }
             this.controllerData.lastRestart = this.controllerData.aButton;
@@ -784,6 +950,7 @@ export class Game {
                 this.weapon.isReloading = false;
                 this.weapon.ammo = this.weapon.maxAmmo;
                 this.audioManager.playReloadEndSound();
+                this.renderer.activateReloadFinishShake(200, 10); // 200ms burst with 10px amplitude
                 console.log('Перезарядка завершена!');
             }
         }
@@ -829,8 +996,22 @@ export class Game {
             this.regenStarted = false; // сбрасываем флаг при получении урона
         }
         
+        // Обновление таймера триггера звука (ИИ)
+        if (this.soundTriggerTimer > 0) {
+            this.soundTriggerTimer -= deltaTime;
+            if (this.soundTriggerTimer <= 0) {
+                this.soundTrigger = null;
+            }
+        }
+        
         // Обновление врагов (с учётом deltaTime для 180 FPS)
         const frameTime = 5.56; // ~180 FPS
+        
+        // Обновление ИИ врагов
+        for (let enemy of this.enemies) {
+            if (enemy.isDead) continue;
+            enemy.updateAI(deltaTime, this);
+        }
         
         // Проверка на NaN для отладки
         if (!Number.isFinite(this.safeTimer)) {
@@ -891,6 +1072,10 @@ export class Game {
                         this.audioManager.playEnemyShootSound();
                         this.player.health--;
                         this.lastDamageTime = Date.now(); // Сброс таймера регена при получении урона
+                        
+                        // Триггер звука для ИИ врагов (выстрел врага тоже слышен)
+                        this.soundTrigger = { x: enemy.x, y: enemy.y };
+                        this.soundTriggerTimer = 2000;
                         this.audioManager.playDamageSound();
                         
                         const angleToEnemy = Math.atan2(-dy, -dx);
@@ -901,6 +1086,10 @@ export class Game {
                         if (this.player.health <= this.renderer.vignette.lowHealth.minHealthThreshold) {
                             this.renderer.activateLowHealthVignette(Math.max(0, 1 - this.player.health / this.renderer.vignette.lowHealth.minHealthThreshold));
                         }
+                        
+                        // Активация тряски камеры при получении урона
+                        // Смещение камеры происходит в сторону противоположной источнику урона
+                        this.renderer.activateDamageShake(500, 35, angleToEnemy);
                         
                         enemy.shootTimer = enemy.shootInterval;
                         enemy.isAiming = false;
@@ -946,39 +1135,124 @@ export class Game {
     }
     
     /**
-     * Рендеринг игры
+     * Переход на следующий уровень
      */
-    render() {
-        // console.log('Render called, MAP:', this.MAP);
-        // console.log('Player:', { x: this.player.x, y: this.player.y, angle: this.player.angle });
+    nextLevel() {
+        this.currentLevel++;
         
-        // Проверяем, инициализирован ли MAP
-        if (!this.MAP || this.MAP.length === 0) {
-            console.error('MAP не инициализирован!');
-            return;
+        // СБРОС СОСТОЯНИЯ GAME OVER - это КРИТИЧНО важно!
+        this.isGameOver = false;
+        this.gameOverTime = 0;
+        this.gameOverIsWin = false;
+        
+        // Сброс состояний
+        this.coinsCollected = 0;
+        this.enemiesKilled = 0;
+        
+        // Полная пересетка игрока
+        this.player.reset();
+        this.player.health = this.player.maxHealth;
+        this.player.angle = 0;
+        
+        // Сброс оружия
+        this.weapon.isShooting = false;
+        this.weapon.shootTimer = 0;
+        this.weapon.recoil = 0;
+        this.weapon.ammo = this.weapon.maxAmmo;
+        this.weapon.isReloading = false;
+        this.weapon.reloadTimer = 0;
+        
+        // Сброс таймеров
+        this.safeTimer = this.safeDuration;
+        this.regenTimer = 0;
+        this.lastDamageTime = Date.now();
+        this.regenStarted = false;
+        
+        this.renderer.reset();
+        
+        // Выход из pointer lock если он активен
+        if (document.pointerLockElement === this.canvas) {
+            document.exitPointerLock();
         }
         
-        this.renderer.render(
-            this.canvas, this.ctx, this.width, this.height, this.keys, this.player, this.weapon,
-            this.MAP, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, this.enemies, this.loot, this.coins,
-            this.coinsCollected, 0, this.player.health, this.isGameOver, this.gameOverTime, this.gameOverIsWin, this.enemiesKilled
-        );
+        // Генерация нового уровня
+        this.generateLevel();
+        
+        console.log(`➡️ Переход на уровень ${this.currentLevel}...`);
+    }
+    
+    /**
+     * Рестарт игры
+     */
+    restartGame() {
+        this.currentLevel = 1;
+        
+        this.player.reset();
+        this.player.health = this.player.maxHealth;
+        this.player.angle = 0;
+        
+        this.weapon.isShooting = false;
+        this.weapon.shootTimer = 0;
+        this.weapon.recoil = 0;
+        this.weapon.ammo = this.weapon.maxAmmo;
+        this.weapon.isReloading = false;
+        this.weapon.reloadTimer = 0;
+        
+        this.isGameOver = false;
+        this.gameOverTime = 0;
+        this.gameOverIsWin = false;
+        this.coinsCollected = 0;
+        this.enemiesKilled = 0;
+        
+        // Сброс таймера неуязвимости при рестарте
+        this.safeTimer = this.safeDuration;
+        
+        // Сброс таймера авторегенерации
+        this.regenTimer = 0;
+        this.lastDamageTime = Date.now();
+        this.regenStarted = false;
+        
+        this.renderer.reset();
+        
+        this.generateLevel();
+        
+        console.log('Игра перезапущена!');
     }
     
     /**
      * Игровой цикл
      */
     gameLoop(timestamp) {
-        // Вычисляем delta time (время с прошлого кадра в миллисекундах)
-        if (this.lastTime === 0) {
-            this.lastTime = timestamp;
+        // Вычисление deltaTime в миллисекундах
+        if (this.lastTime) {
+            this.deltaTime = timestamp - this.lastTime;
+        } else {
+            this.deltaTime = 16.67; // Дефолтное значение ~60 FPS
         }
-        this.deltaTime = timestamp - this.lastTime;
         this.lastTime = timestamp;
         
-        this.update(this.deltaTime);
+        // Ограничение deltaTime максимум 100мс
+        const clampedDeltaTime = Math.min(this.deltaTime, 100);
+        
+        // Обновление игры
+        this.update(clampedDeltaTime);
+        
+        // Отрисовка
         this.render();
+        
+        // Запрос следующего кадра
         requestAnimationFrame((ts) => this.gameLoop(ts));
+    }
+    
+    /**
+     * Отрисовка текущего кадра
+     */
+    render() {
+        this.renderer.render(
+            this.canvas, this.ctx, this.width, this.height, this.keys, this.player, this.weapon,
+            this.MAP, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, this.enemies, this.loot, this.coins,
+            this.coinsCollected, 0, this.player.health, this.isGameOver, this.gameOverTime, this.gameOverIsWin, this.enemiesKilled, this.currentLevel
+        );
     }
     
     /**
@@ -987,6 +1261,8 @@ export class Game {
     start() {
         this.resizeCanvas();
         this.generateLevel();
+        this.lastTime = 0;
+        this.deltaTime = 16.67;
         requestAnimationFrame((ts) => this.gameLoop(ts));
         console.log('Игра инициализирована!');
     }

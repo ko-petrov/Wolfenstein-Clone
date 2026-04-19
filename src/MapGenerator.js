@@ -25,11 +25,31 @@ export class MapGenerator {
     initEmptyMap() {
         this.MAP = [];
         for (let y = 0; y < this.MAP_HEIGHT; y++) {
-            this.MAP[y] = [];
-            for (let x = 0; x < this.MAP_WIDTH; x++) {
-                this.MAP[y][x] = 1; // 1 = стена
-            }
+            this.MAP[y] = new Array(this.MAP_WIDTH).fill(1);
         }
+    }
+    
+    /**
+     * Гарантирует, что строка карты инициализирована
+     * @param {number} y - Номер строки
+     */
+    ensureMapRow(y) {
+        if (y < 0 || y >= this.MAP_HEIGHT) return;
+        if (!this.MAP[y]) {
+            this.MAP[y] = new Array(this.MAP_WIDTH).fill(1);
+        }
+    }
+    
+    /**
+     * Безопасная запись значения в карту
+     * @param {number} x - X координата
+     * @param {number} y - Y координата  
+     * @param {number} value - Значение для записи
+     */
+    setTileSafe(x, y, value) {
+        if (x < 0 || x >= this.MAP_WIDTH || y < 0 || y >= this.MAP_HEIGHT) return;
+        this.ensureMapRow(y);
+        this.MAP[y][x] = value;
     }
     
     /**
@@ -59,9 +79,7 @@ export class MapGenerator {
     cutRectangularRoom(x, y, width, height) {
         for (let ry = y; ry < y + height; ry++) {
             for (let rx = x; rx < x + width; rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0; // 0 = пустота
-                }
+                this.setTileSafe(rx, ry, 0); // 0 = пустота
             }
         }
     }
@@ -74,18 +92,14 @@ export class MapGenerator {
         const leftWidth = Math.floor(width * 0.6);
         for (let ry = y; ry < y + height; ry++) {
             for (let rx = x; rx < x + leftWidth; rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0;
-                }
+                this.setTileSafe(rx, ry, 0);
             }
         }
         // Нижняя часть (горизонтальная)
         const bottomHeight = Math.floor(height * 0.4);
         for (let ry = y + height - bottomHeight; ry < y + height; ry++) {
             for (let rx = x; rx < x + width; rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0;
-                }
+                this.setTileSafe(rx, ry, 0);
             }
         }
     }
@@ -98,9 +112,7 @@ export class MapGenerator {
         const topHeight = Math.floor(height * 0.3);
         for (let ry = y; ry < y + topHeight; ry++) {
             for (let rx = x; rx < x + width; rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0;
-                }
+                this.setTileSafe(rx, ry, 0);
             }
         }
         // Центральная вертикальная часть
@@ -108,9 +120,7 @@ export class MapGenerator {
         const stemX = x + Math.floor(width * 0.3);
         for (let ry = y + topHeight; ry < y + height; ry++) {
             for (let rx = stemX; rx < stemX + stemWidth; rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0;
-                }
+                this.setTileSafe(rx, ry, 0);
             }
         }
     }
@@ -127,17 +137,13 @@ export class MapGenerator {
         // Горизонтальная перекладина
         for (let ry = centerY - Math.floor(armHeight / 2); ry < centerY + Math.ceil(armHeight / 2); ry++) {
             for (let rx = x; rx < x + width; rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0;
-                }
+                this.setTileSafe(rx, ry, 0);
             }
         }
         // Вертикальная перекладина
         for (let ry = y; ry < y + height; ry++) {
             for (let rx = centerX - Math.floor(armWidth / 2); rx < centerX + Math.ceil(armWidth / 2); rx++) {
-                if (rx >= 0 && rx < this.MAP_WIDTH && ry >= 0 && ry < this.MAP_HEIGHT) {
-                    this.MAP[ry][rx] = 0;
-                }
+                this.setTileSafe(rx, ry, 0);
             }
         }
     }
@@ -164,30 +170,147 @@ export class MapGenerator {
     }
     
     /**
-     * Создание прохода между двумя комнатами
+     * Расчет расстояния между центрами двух комнат
+     * @param {Object} room1 - Первая комната
+     * @param {Object} room2 - Вторая комната
+     * @returns {number} Евклидово расстояние между центрами
      */
-    createCorridor(room1, room2) {
-        // Центр каждой комнаты
-        const x1 = room1.x + Math.floor(room1.width / 2);
-        const y1 = room1.y + Math.floor(room1.height / 2);
-        const x2 = room2.x + Math.floor(room2.width / 2);
-        const y2 = room2.y + Math.floor(room2.height / 2);
+    calculateDistance(room1, room2) {
+        const cx1 = room1.x + room1.width / 2;
+        const cy1 = room1.y + room1.height / 2;
+        const cx2 = room2.x + room2.width / 2;
+        const cy2 = room2.y + room2.height / 2;
+        return Math.sqrt((cx2 - cx1) ** 2 + (cy2 - cy1) ** 2);
+    }
+    
+    /**
+     * Найти точку внутри комнаты для начала/конца коридора
+     * Ищет первую пустую клетку на линии от центра к указанной точке
+     */
+    findEntryPoint(room, targetX, targetY) {
+        const cx = Math.round(room.x + room.width / 2);
+        const cy = Math.round(room.y + room.height / 2);
         
-        // Горизонтальный коридор
-        const minX = Math.min(x1, x2);
-        const maxX = Math.max(x1, x2);
-        for (let x = minX; x <= maxX; x++) {
-            if (x >= 0 && x < this.MAP_WIDTH && y1 >= 0 && y1 < this.MAP_HEIGHT) {
-                this.MAP[y1][x] = 0;
+        // Направление от центра к цели
+        const dx = Math.sign(targetX - cx);
+        const dy = Math.sign(targetY - cy);
+        
+        // Если цель точно по центру, выбираем горизонтальное направление
+        const absDx = Math.abs(targetX - cx);
+        const absDy = Math.abs(targetY - cy);
+        
+        // Движемся от центра к краю комнаты в направлении цели
+        // Ищем первую пустую клетку (внутри комнаты)
+        for (let dist = 0; dist <= Math.max(room.width, room.height); dist++) {
+            const testX = cx + Math.round(dx * dist * 0.5);
+            const testY = cy + Math.round(dy * dist * 0.5);
+            
+            // Проверяем все клетки в небольшом радиусе вокруг линии
+            for (let ox = -1; ox <= 1; ox++) {
+                for (let oy = -1; oy <= 1; oy++) {
+                    const checkX = testX + ox;
+                    const checkY = testY + oy;
+                    
+                    // Проверяем, что клетка внутри комнаты
+                    if (checkX >= room.x && checkX < room.x + room.width &&
+                        checkY >= room.y && checkY < room.y + room.height) {
+                        // Проверяем, что клетка пустая
+                        if (this.MAP[checkY] && this.MAP[checkY][checkX] === 0) {
+                            return { x: checkX, y: checkY };
+                        }
+                    }
+                }
             }
         }
         
-        // Вертикальный коридор
-        const minY = Math.min(y1, y2);
-        const maxY = Math.max(y1, y2);
+        // Fallback: возвращаем центр комнаты
+        return { x: cx, y: cy };
+    }
+    
+    /**
+     * Создание коридора между двумя комнатами
+     * Коридор всегда проходит сквозь стены комнат для надежного соединения
+     */
+    createCorridor(room1, room2) {
+        const center1 = { x: room1.x + room1.width / 2, y: room1.y + room1.height / 2 };
+        const center2 = { x: room2.x + room2.width / 2, y: room2.y + room2.height / 2 };
+        
+        // Находим точки входа/выхода внутри комнат
+        const p1 = this.findEntryPoint(room1, center2.x, center2.y);
+        const p2 = this.findEntryPoint(room2, center1.x, center1.y);
+        
+        // Рисуем коридор T-образно:
+        // 1. Горизонтальная линия от p1 по Y на уровне p1
+        // 2. Вертикальная линия от уровня p1 до уровня p2 по X p2
+        
+        const minX = Math.min(p1.x, p2.x);
+        const maxX = Math.max(p1.x, p2.x);
+        for (let x = minX; x <= maxX; x++) {
+            this.setTileSafe(x, p1.y, 0);
+        }
+        
+        const minY = Math.min(p1.y, p2.y);
+        const maxY = Math.max(p1.y, p2.y);
         for (let y = minY; y <= maxY; y++) {
-            if (x2 >= 0 && x2 < this.MAP_WIDTH && y >= 0 && y < this.MAP_HEIGHT) {
-                this.MAP[y][x2] = 0;
+            this.setTileSafe(p2.x, y, 0);
+        }
+    }
+    
+    /**
+     * Соединение комнат используя алгоритм ближайших соседей (MST через Крускала)
+     */
+    connectClosestRooms() {
+        if (this.rooms.length < 2) return;
+
+        // Создаем список всех ребер с весами (расстояниями)
+        const edges = [];
+        for (let i = 0; i < this.rooms.length; i++) {
+            for (let j = i + 1; j < this.rooms.length; j++) {
+                const dist = this.calculateDistance(this.rooms[i], this.rooms[j]);
+                edges.push({ from: i, to: j, dist });
+            }
+        }
+
+        // Сортируем по расстоянию (жадный подход)
+        edges.sort((a, b) => a.dist - b.dist);
+
+        // Используем структуру Union-Find для определения компонент связности
+        const parent = this.rooms.map((_, i) => i);
+        const rank = new Array(this.rooms.length).fill(0);
+        
+        const find = (x) => {
+            while (parent[x] !== x) {
+                parent[x] = parent[parent[x]]; // сжатие пути
+                x = parent[x];
+            }
+            return x;
+        };
+        
+        const union = (x, y) => {
+            const px = find(x);
+            const py = find(y);
+            if (px === py) return false;
+            
+            // По рангу
+            if (rank[px] < rank[py]) {
+                parent[px] = py;
+            } else if (rank[px] > rank[py]) {
+                parent[py] = px;
+            } else {
+                parent[py] = px;
+                rank[px]++;
+            }
+            return true;
+        };
+
+        // Алгоритм Крускала: берем самые короткие ребра соединяющие разные компоненты
+        let edgesUsed = 0;
+        for (const edge of edges) {
+            if (union(edge.from, edge.to)) {
+                this.createCorridor(this.rooms[edge.from], this.rooms[edge.to]);
+                edgesUsed++;
+                // Все комнаты соединены
+                if (edgesUsed >= this.rooms.length - 1) break;
             }
         }
     }
@@ -286,7 +409,7 @@ export class MapGenerator {
      * @param {number} roomIndex - Индекс комнаты (0 = первая комната, где спавнится игрок)
      */
     addObstacles(room, roomIndex = -1) {
-        const obstacleCount = 3 + Math.floor(Math.random() * 4); // 3-6 препятствий (больше)
+        const obstacleCount = 3 + Math.floor(Math.random() * 4); // 3-6 препятствий
         
         // Вычисляем зону спавна для первой комнаты (индекс 0)
         let spawnZoneRadius = 0;
@@ -297,7 +420,7 @@ export class MapGenerator {
             // Для первой комнаты создаём защищённую зону спавна
             spawnZoneCenterX = room.x + room.width / 2;
             spawnZoneCenterY = room.y + room.height / 2;
-            spawnZoneRadius = Math.min(room.width, room.height) * 0.55; // 55% от минимальной стороны (увеличено для защиты спавна)
+            spawnZoneRadius = Math.min(room.width, room.height) * 0.55;
         }
         
         // Массив для хранения созданных препятствий (для проверки пересечений)
@@ -305,8 +428,8 @@ export class MapGenerator {
         
         for (let i = 0; i < obstacleCount; i++) {
             // Размер препятствия
-            const obsWidth = 2 + Math.floor(Math.random() * 3);
-            const obsHeight = 2 + Math.floor(Math.random() * 3);
+            const obsWidth = 1 + Math.floor(Math.random() * 1);
+            const obsHeight = 1 + Math.floor(Math.random() * 1);
             
             // Позиция внутри комнаты (с отступом от краев)
             const padding = 2;
@@ -318,7 +441,7 @@ export class MapGenerator {
                 const obsX = room.x + padding + Math.floor(Math.random() * (maxObsX - room.x - padding + 1));
                 const obsY = room.y + padding + Math.floor(Math.random() * (maxObsY - room.y - padding + 1));
            
-                // Проверка, что препятствие не перекрывает центр комнаты (чтобы не блокировать проход)
+                // Проверка, что препятствие не перекрывает центр комнаты
                 const roomCenterX = room.x + room.width / 2;
                 const roomCenterY = room.y + room.height / 2;
                 const distToCenter = Math.sqrt(
@@ -338,7 +461,6 @@ export class MapGenerator {
                 // Проверка, что препятствие не пересекается с другими препятствиями (с отступом 1 клетка)
                 let overlapsWithOther = false;
                 for (let otherObs of placedObstacles) {
-                    // Проверяем пересечение с отступом в 1 клетку
                     if (obsX - 1 < otherObs.x + otherObs.width &&
                         obsX + obsWidth + 1 > otherObs.x &&
                         obsY - 1 < otherObs.y + otherObs.height &&
@@ -354,10 +476,9 @@ export class MapGenerator {
                     // Ставим препятствие
                     for (let oy = obsY; oy < obsY + obsHeight && oy < this.MAP_HEIGHT; oy++) {
                         for (let ox = obsX; ox < obsX + obsWidth && ox < this.MAP_WIDTH; ox++) {
-                            this.MAP[oy][ox] = 1; // 1 = стена
+                            this.setTileSafe(ox, oy, 1); // 1 = стена
                         }
                     }
-                    // Добавляем в список размещённых препятствий
                     placedObstacles.push({ x: obsX, y: obsY, width: obsWidth, height: obsHeight });
                     break;
                 }
@@ -369,21 +490,29 @@ export class MapGenerator {
     /**
      * Генерация уровня с комнатами разных форм
      * @param {number} playerRadius - Радиус игрока для проверки спавна
-     * @returns {Array} Массив сгенерированных комнат
+     * @param {number} level - Текущий уровень сложности
+     * @returns {Object} Объект с комнатами и позицией спавна
      */
-    generateLevel(playerRadius) {
+    generateLevel(playerRadius, level = 1) {
         this.initEmptyMap();
         this.rooms = [];
         
-        const roomCount = 15 + Math.floor(Math.random() * 8); // 15-22 комнат (больше комнат)
+        // Количество комнат зависит от уровня:
+        // Уровень 1: 5-6 комнат, Уровень 5: ~13 комнат, Уровень 10: ~22 комнаты
+        const minRooms = 5;
+        const maxRooms = 22;
+        const roomIncreasePerLevel = Math.floor((maxRooms - minRooms) / 10);
+        const baseRoomCount = minRooms + (level - 1) * roomIncreasePerLevel;
+        const roomCount = baseRoomCount + Math.floor(Math.random() * 3);
         const shapes = Object.values(this.ROOM_SHAPES);
         
         // Генерация комнат
         for (let i = 0; i < roomCount; i++) {
             let attempts = 0;
-            const maxAttempts = 30;
+            const maxAttempts = 50;
+            let placed = false;
             
-            while (attempts < maxAttempts) {
+            while (attempts < maxAttempts && !placed) {
                 // Случайная форма
                 const shape = shapes[Math.floor(Math.random() * shapes.length)];
                 
@@ -391,33 +520,50 @@ export class MapGenerator {
                 let width, height;
                 switch (shape) {
                     case this.ROOM_SHAPES.SQUARE:
-                        const size = 5 + Math.floor(Math.random() * 4); // 4-6 (меньше)
+                        const size = 4 + Math.floor(Math.random() * 3);
                         width = size;
                         height = size;
                         break;
                     case this.ROOM_SHAPES.RECTANGLE:
                         if (Math.random() < 0.5) {
-                            width = 5 + Math.floor(Math.random() * 5); // 4-7 (меньше)
-                            height = 4 + Math.floor(Math.random() * 4); // 3-5 (меньше)
+                            width = 4 + Math.floor(Math.random() * 4);
+                            height = 3 + Math.floor(Math.random() * 3);
                         } else {
-                            width = 4 + Math.floor(Math.random() * 4); // 3-5 (меньше)
-                            height = 5 + Math.floor(Math.random() * 5); // 4-7 (меньше)
+                            width = 3 + Math.floor(Math.random() * 3);
+                            height = 4 + Math.floor(Math.random() * 4);
                         }
                         break;
                     case this.ROOM_SHAPES.L_SHAPE:
                     case this.ROOM_SHAPES.T_SHAPE:
                     case this.ROOM_SHAPES.CROSS:
-                        width = 9 + Math.floor(Math.random() * 4); // 5-8 (меньше)
-                        height = 8 + Math.floor(Math.random() * 4); // 4-7 (меньше)
+                        width = 6 + Math.floor(Math.random() * 4);
+                        height = 6 + Math.floor(Math.random() * 4);
                         break;
                     default:
                         width = 6;
                         height = 6;
                 }
                 
-                // Случайная позиция
-                const x = 1 + Math.floor(Math.random() * (this.MAP_WIDTH - width - 3));
-                const y = 1 + Math.floor(Math.random() * (this.MAP_HEIGHT - height - 3));
+                let x, y;
+                
+                // 65% шанс разместить комнату рядом с последней, 35% — полностью случайно
+                if (i > 0 && Math.random() < 0.65 && this.rooms.length > 0) {
+                    // Размещаем Near последней комнаты
+                    const lastRoom = this.rooms[this.rooms.length - 1];
+                    const lastCx = lastRoom.x + lastRoom.width / 2;
+                    const lastCy = lastRoom.y + lastRoom.height / 2;
+                    
+                    // Случайный угол вокруг последней комнаты
+                    const angle = Math.random() * Math.PI * 2;
+                    const distance = 4 + Math.floor(Math.random() * 5);
+                    
+                    x = Math.round(lastCx + Math.cos(angle) * distance - width / 2);
+                    y = Math.round(lastCy + Math.sin(angle) * distance - height / 2);
+                } else {
+                    // Полностью случайная позиция
+                    x = 1 + Math.floor(Math.random() * (this.MAP_WIDTH - width - 3));
+                    y = 1 + Math.floor(Math.random() * (this.MAP_HEIGHT - height - 3));
+                }
                 
                 // Проверка, можно ли разместить комнату
                 if (this.canPlaceRoom(x, y, width, height)) {
@@ -430,35 +576,32 @@ export class MapGenerator {
                     };
                     this.rooms.push(room);
                     this.cutRoom(room);
-                    break;
+                    placed = true;
                 }
                 attempts++;
             }
         }
         
-        // Создание коридоров между комнатами
-        for (let i = 0; i < this.rooms.length - 1; i++) {
-            this.createCorridor(this.rooms[i], this.rooms[i + 1]);
-        }
+        // Создание коридоров между комнатами используя nearest neighbor (MST)
+        this.connectClosestRooms();
         
-        // Добавление препятствий в комнаты (передаём индекс для первой комнаты)
+        // Добавление препятствий в комнаты
         for (let i = 0; i < this.rooms.length; i++) {
-            if (Math.random() < 0.7) { // 70% комнат имеют препятствия (больше)
+            if (Math.random() < 0.7) {
                 this.addObstacles(this.rooms[i], i);
             }
         }
         
-        // Установка позиции игрока в первой комнате с поиском валидной позиции
+        // Установка позиции игрока в первой комнате
         let spawnPos = null;
         if (this.rooms.length > 0) {
             spawnPos = this.findValidSpawnPosition(this.rooms[0], playerRadius);
         } else {
-            // Дефолтная позиция если комнаты не сгенерировались
             spawnPos = {
                 x: this.MAP_WIDTH * this.TILE_SIZE / 2,
                 y: this.MAP_HEIGHT * this.TILE_SIZE / 2
             };
-            console.warn('Предупреждение: комнаты не сгенерировались, установлена дефолтная позиция');
+            console.warn('Комнаты не сгенерировались, установлена дефолтная позиция');
         }
         
         console.log(`Генерация уровня: ${this.rooms.length} комнат`);

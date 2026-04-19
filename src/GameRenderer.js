@@ -38,6 +38,41 @@ export class GameRenderer {
                 maxIntensity: 0.9
             }
         };
+
+        // Тряска камеры при получении урона
+        this.damageShake = {
+            active: false,
+            duration: 0,
+            totalDuration: 0,
+            offsetX: 0,
+            offsetY: 0,
+            maxOffsetX: 0,
+            maxOffsetY: 0,
+            maxOffset: 0,
+            attackAngle: null,
+            absoluteAttackAngle: null
+        };
+        
+        // Тряска камеры при отдаче оружия (с использованием логики damageShake)
+        this.weaponShake = {
+            active: false,
+            duration: 0,
+            totalDuration: 0,
+            maxOffset: 0
+        };
+        
+        // Тряска камеры при перезарядке оружия
+        this.reloadShake = {
+            active: false,
+            duration: 0,
+            totalDuration: 0,
+            maxOffset: 0,
+            isFinishBurst: false,
+            finishBurstDuration: 0,
+            finishBurstTotalDuration: 0,
+            finishBurstMaxOffset: 0,
+            phase: 0
+        };
     }
     
     reset() {
@@ -54,6 +89,20 @@ export class GameRenderer {
         this.vignette.lowHealth.intensity = 0;
         this.vignette.directional.active = false;
         this.vignette.directional.intensity = 0;
+        this.damageShake.active = false;
+        this.damageShake.duration = 0;
+        this.damageShake.totalDuration = 0;
+        this.damageShake.offsetX = 0;
+        this.damageShake.offsetY = 0;
+        this.damageShake.maxOffsetX = 0;
+        this.damageShake.maxOffsetY = 0;
+        this.damageShake.maxOffset = 0;
+        this.damageShake.attackAngle = null;
+        this.damageShake.absoluteAttackAngle = null;
+        this.weaponShake.active = false;
+        this.weaponShake.duration = 0;
+        this.weaponShake.totalDuration = 0;
+        this.weaponShake.maxOffset = 0;
     }
     
     setBobbing(bobbing) {
@@ -65,7 +114,7 @@ export class GameRenderer {
         this.recoil = recoil;
     }
     
-    render(canvas, ctx, width, height, keys, player, weapon, map, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, enemies, loot, coins, coinsCollected, score, health, isGameOver, gameOverTime, gameOverWin, enemiesKilled) {
+    render(canvas, ctx, width, height, keys, player, weapon, map, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, enemies, loot, coins, coinsCollected, score, health, isGameOver, gameOverTime, gameOverWin, enemiesKilled, currentLevel = 1) {
         // Вычисляем смещение камеры для эффекта покачивания (Bobbing)
         let cameraBobY = 0;
         let cameraBobX = 0;
@@ -90,6 +139,23 @@ export class GameRenderer {
             const shakeAmplitude = isRunning ? 3 : 1;
             cameraBobX = Math.sin(player.bobbing.phase * shakeFrequency) * shakeAmplitude * shakeIntensity;
         }
+
+        // Добавляем тряску от получения урона
+        const damageShake = this.getDamageShakeOffset(player);
+        cameraBobX += damageShake.x;
+        cameraBobY += damageShake.y;
+        
+        // Добавляем тряску от отдачи оружия
+        const weaponShake = this.getWeaponShakeOffset();
+        cameraBobX += weaponShake.x;
+        cameraBobY += weaponShake.y;
+        
+        // Добавляем тряску от перезарядки
+        const reloadShake = this.getReloadShakeOffset();
+        cameraBobX += reloadShake.x;
+        cameraBobY += reloadShake.y;
+        
+        // console.log(`📷 Camera Shake X: ${cameraBobX.toFixed(2)}, Y: ${cameraBobY.toFixed(2)}`);
 
         // 1. Очистка и отрисовка пола/потолка
         const horizonY = height / 2 + cameraBobY;
@@ -124,7 +190,16 @@ export class GameRenderer {
         // 7. Оружие
         this.renderWeapon(ctx, width, height, keys, player, weapon);
         
-        // 7.5. Виньетки (передаём deltaTime с дефолтным значением для 180 FPS)
+        // 7.5. Обновляем тряску от урона (используем deltaTime для 180 FPS)
+        this.updateDamageShake(5.56);
+        
+        // 7.55. Обновляем тряску от отдачи оружия
+        this.updateWeaponShake(5.56);
+        
+        // 7.56. Обновляем тряску от перезарядки
+        this.updateReloadShake(5.56);
+        
+        // 7.6. Виньетки (передаём deltaTime с дефолтным значением для 180 FPS)
         this.drawVignettes(ctx, width, height, player, 5.56);
         
         // 8. Счётчик очков
@@ -136,9 +211,12 @@ export class GameRenderer {
         // 10. Патроны
         this.renderAmmo(ctx, width, height, weapon);
     
-        // 11. Game Over
+        // 11. Уровень
+        this.renderLevel(ctx, width, currentLevel);
+        
+        // 12. Game Over
         if (isGameOver) {
-            this.renderGameOver(ctx, width, height, gameOverWin, coinsCollected, enemiesKilled);
+            this.renderGameOver(ctx, width, height, gameOverWin, coinsCollected, enemiesKilled, currentLevel);
         }
         
         return zBuffer;
@@ -732,27 +810,40 @@ export class GameRenderer {
                 ctx.save();
                 const spriteTopY = horizonY + spriteHeight * 1.3;
                 ctx.translate(screenX, spriteTopY + spriteHeight / 2);
-            
-                ctx.fillStyle = '#FFD700';
+                            
+                const radius = spriteHeight / 2;
+                            
                 for (let screenXPos = spriteLeft; screenXPos < spriteRight; screenXPos++) {
+                    // 1. ПРОВЕРКА Z-БУФЕРА (возвращаем на место)
                     if (dist >= zBuffer[screenXPos] * 64) continue;
-                    const relativeX = (screenXPos - screenX) / spriteWidth * 2;
+                
+                    const relativeX = (screenXPos - screenX) / radius;
+                
                     if (relativeX >= -1 && relativeX <= 1) {
-                        const y = Math.sqrt(1 - relativeX * relativeX) * spriteHeight / 2;
-                        ctx.fillRect(screenXPos - screenX, -y, 1, y * 2);
+                        const halfHeight = Math.sqrt(1 - relativeX * relativeX) * radius;
+                        
+                        // 2. РИСУЕМ ВЕРТИКАЛЬНУЮ ПОЛОСКУ С ГРАДИЕНТОМ
+                        // Создаем линейный градиент сверху вниз для КАЖДОЙ полоски
+                        const lineGrad = ctx.createLinearGradient(0, -halfHeight, 0, halfHeight);
+                        
+                        // Магия: меняем яркость в зависимости от X (горизонтальный объем)
+                        // и добавляем блик в конкретной области
+                        let brightness = 1 - Math.abs(relativeX + 0.3) * 0.5; // Базовое затенение по бокам
+                        
+                        if (relativeX > -0.6 && relativeX < -0.2) {
+                            // Если мы в зоне блика, осветляем полоску сверху
+                            lineGrad.addColorStop(0, '#FFFACD'); // Блик сверху
+                            lineGrad.addColorStop(0.4, '#FFD700'); // Переход в золото
+                            lineGrad.addColorStop(1, '#B8860B');   // Тень внизу
+                        } else {
+                            lineGrad.addColorStop(0, '#FFD700');   // Просто золото
+                            lineGrad.addColorStop(1, '#B8860B');   // Тень внизу
+                        }
+                    
+                        ctx.fillStyle = lineGrad;
+                        ctx.fillRect(screenXPos - screenX, -halfHeight, 1, halfHeight * 2);
                     }
                 }
-                
-                ctx.fillStyle = '#FFFACD';
-                for (let screenXPos = spriteLeft; screenXPos < spriteRight; screenXPos++) {
-                    if (dist >= zBuffer[screenXPos] * 64) continue;
-                    const relativeX = (screenXPos - screenX) / spriteWidth * 2;
-                    if (relativeX >= -0.4 && relativeX <= -0.2) {
-                        const y = Math.sqrt(1 - relativeX * relativeX) * spriteHeight / 4;
-                        ctx.fillRect(screenXPos - screenX, -spriteHeight / 2 - y, 1, y * 2);
-                    }
-                }
-                
                 ctx.restore();
             }
         }
@@ -986,6 +1077,237 @@ export class GameRenderer {
         this.vignette.lowHealth.active = true;
         this.vignette.lowHealth.intensity = intensity;
     }
+
+    activateDamageShake(duration = 300, maxOffset = 30, attackAngle = null) {
+        this.damageShake.active = true;
+        this.damageShake.duration = duration;
+        this.damageShake.totalDuration = duration;
+        this.damageShake.maxOffset = maxOffset;
+        this.damageShake.attackAngle = attackAngle;
+        
+        if (attackAngle !== null) {
+            // Вычисляем смещение на основе угла атаки относительно направления взгляда игрока
+            // Этот метод будет вызываться с абсолютным углом врага
+            // Но getDamageShakeOffset получает смещение относительно камеры
+            this.damageShake.absoluteAttackAngle = attackAngle;
+        } else {
+            this.damageShake.absoluteAttackAngle = null;
+        }
+        console.log(`📷 Damage Shake Activated: duration=${duration}ms, maxOffset=${maxOffset}, absoluteAttackAngle=${attackAngle}`);
+    }
+
+    updateDamageShake(deltaTime) {
+        if (this.damageShake.active) {
+            const deltaRatio = deltaTime / 5.56;
+            const clampedDeltaRatio = Math.min(deltaRatio, 6);
+            this.damageShake.duration -= clampedDeltaRatio * 5.56;
+            
+            if (this.damageShake.duration <= 0) {
+                this.damageShake.duration = 0;
+                this.damageShake.active = false;
+                this.damageShake.offsetX = 0;
+                this.damageShake.offsetY = 0;
+                this.damageShake.maxOffsetX = 0;
+                this.damageShake.maxOffsetY = 0;
+            }
+        }
+    }
+
+    getDamageShakeOffset(player = null) {
+        if (!this.damageShake.active) {
+            return { x: 0, y: 0 };
+        }
+
+        // Вычисляем базовое смещение на основе направления атаки
+        let offsetX = 0;
+        let offsetY = 0;
+        
+        if (this.damageShake.absoluteAttackAngle !== null && player !== null) {
+            // Вычисляем относительный угол атаки (угол врага относительно направления взгляда игрока)
+            let relativeAngle = this.damageShake.absoluteAttackAngle - player.angle;
+            while (relativeAngle < -Math.PI) relativeAngle += Math.PI * 2;
+            while (relativeAngle > Math.PI) relativeAngle -= Math.PI * 2;
+            
+            // Смещение камеры в сторону противоположную атаке:
+            // - Если атака спереди (relativeAngle ≈ 0), камера смещается вверх (отрицательный Y)
+            // - Если атака сзади (relativeAngle ≈ ±π), камера смещается вниз (положительный Y)
+            // - Если атака справа (relativeAngle ≈ π/2), камера смещается вправо (положительный X)
+            // - Если атака слева (relativeAngle ≈ -π/2), камера смещается влево (отрицательный X)
+            
+            // cos(relativeAngle) = 1 спереди, -1 сзади
+            // sin(relativeAngle) = 1 справа, -1 слева
+            
+            // Смещение по X: вправо при атаке справа, влево при атаке слева
+            offsetX = Math.sin(relativeAngle) * this.damageShake.maxOffset;
+            // Смещение по Y: вверх при атаке спереди, вниз при атаке сзади
+            offsetY = -Math.cos(relativeAngle) * this.damageShake.maxOffset;
+        }
+        
+        // Вычисляем прогресс (0 = начало, 1 = конец эффекта)
+        const progress = 1 - (this.damageShake.duration / this.damageShake.totalDuration);
+        
+        // Основное смещение камеры с экспоненциальным затуханием
+        const decayFactor = Math.exp(-3 * progress);
+        const shakeX = offsetX * decayFactor;
+        const shakeY = offsetY * decayFactor;
+        
+        // Боковая тряска (перпендикулярна направлению смещения камеры)
+        // Вектор смещения: (offsetX, offsetY)
+        // Перпендикулярный вектор (90 градусов): (-offsetY, offsetX)
+        // Нормализуем и умножаем на амплитуду боковой тряски
+        const magnitude = Math.sqrt(offsetX * offsetX + offsetY * offsetY);
+        let sideShakeX = 0;
+        let sideShakeY = 0;
+        
+        if (magnitude > 0) {
+            // Нормализованный перпендикулярный вектор
+            const perpX = -offsetY / magnitude;
+            const perpY = offsetX / magnitude;
+            
+            // Боковая тряска: максимальна в начале, быстро затухает
+            // Используем аналогичную формулу как у тряски от шагов, но с прогрессом
+            const sideShakeIntensity = Math.exp(-10 * progress); // Более быстрое затухание для боковой тряски
+            const sideShakeFrequency = 10; // Частота боковой тряски
+            const sideShakeAmplitude = 8; // Амплитуда боковой тряски (пиксели)
+            
+            // Синусоидальная боковая тряска
+            const sideShakeValue = Math.sin(progress * sideShakeFrequency * Math.PI * 2) * sideShakeAmplitude * sideShakeIntensity;
+            
+            sideShakeX = perpX * sideShakeValue;
+            sideShakeY = perpY * sideShakeValue;
+        }
+        
+        return {
+            x: shakeX + sideShakeX,
+            y: shakeY + sideShakeY
+        };
+    }
+    
+    // --- Методы для тряски от отдачи оружия ---
+    
+    activateWeaponRecoilShake(duration = 180, maxOffset = 55) {
+        this.weaponShake.active = true;
+        this.weaponShake.duration = duration;
+        this.weaponShake.totalDuration = duration;
+        this.weaponShake.maxOffset = maxOffset;
+        console.log(`🔫 Weapon Recoil Shake Activated: duration=${duration}ms, maxOffset=${maxOffset}`);
+    }
+    
+    updateWeaponShake(deltaTime) {
+        if (this.weaponShake.active) {
+            const deltaRatio = deltaTime / 5.56;
+            const clampedDeltaRatio = Math.min(deltaRatio, 6);
+            this.weaponShake.duration -= clampedDeltaRatio * 5.56;
+            
+            if (this.weaponShake.duration <= 0) {
+                this.weaponShake.duration = 0;
+                this.weaponShake.active = false;
+            }
+        }
+    }
+    
+    getWeaponShakeOffset() {
+        if (!this.weaponShake.active) {
+            return { x: 0, y: 0 };
+        }
+        
+        // Для отдачи оружия: смещение строго вверх (отрицательный Y)
+        // Угол направления смещения = 0 относительно взгляда игрока (вперёд-вверх)
+        const offsetY = this.weaponShake.maxOffset; // Строго вверх
+        
+        // Вычисляем прогресс (0 = начало, 1 = конец эффекта)
+        const progress = 1 - (this.weaponShake.duration / this.weaponShake.totalDuration);
+        
+        // Основное смещение камеры с экспоненциальным затуханием
+        // Используем более быстрое затухание (коэффициент 5 вместо 3) для более резкого эффекта отдачи
+        const decayFactor = Math.exp(-5 * progress);
+        const shakeY = offsetY * decayFactor;
+        
+        // Небольшая боковая тряска (меньше чем у damageShake)
+        // Для отдачи — боковая тряска очень небольшая, почти незаметная
+        const sideShakeAmplitude = 6; // Значительно меньше, чем у damageShake (8)
+        const sideShakeFrequency = 15;
+        const sideShakeIntensity = Math.exp(-80 * progress); // Более быстрое затухание
+        
+        const sideShakeX = Math.sin(progress * sideShakeFrequency * Math.PI * 2) * sideShakeAmplitude * sideShakeIntensity;
+        
+        return {
+            x: sideShakeX,
+            y: shakeY
+        };
+    }
+    
+    // --- Методы для тряски при перезарядке ---
+    
+    activateReloadShake(duration = 1500, maxOffset = 4) {
+        this.reloadShake.active = true;
+        this.reloadShake.duration = duration;
+        this.reloadShake.totalDuration = duration;
+        this.reloadShake.maxOffset = maxOffset;
+        this.reloadShake.isFinishBurst = false;
+        this.reloadShake.phase = 0;
+        console.log(`🔄 Reload Shake Activated: duration=${duration}ms, maxOffset=${maxOffset}`);
+    }
+    
+    activateReloadFinishShake(duration = 200, maxOffset = 10) {
+        this.reloadShake.isFinishBurst = true;
+        this.reloadShake.finishBurstDuration = duration;
+        this.reloadShake.finishBurstTotalDuration = duration;
+        this.reloadShake.finishBurstMaxOffset = maxOffset;
+        console.log(`🔄 Reload Finish Burst: duration=${duration}ms, maxOffset=${maxOffset}`);
+    }
+    
+    updateReloadShake(deltaTime) {
+        // Обновляем основное покачивание
+        if (this.reloadShake.active && !this.reloadShake.isFinishBurst) {
+            const deltaRatio = deltaTime / 5.56;
+            const clampedDeltaRatio = Math.min(deltaRatio, 6);
+            this.reloadShake.duration -= clampedDeltaRatio * 5.56;
+            
+            if (this.reloadShake.duration <= 0) {
+                this.reloadShake.duration = 0;
+                this.reloadShake.active = false;
+            }
+        }
+        
+        // Обновляем финишную вспышку
+        if (this.reloadShake.isFinishBurst) {
+            const deltaRatio = deltaTime / 5.56;
+            const clampedDeltaRatio = Math.min(deltaRatio, 6);
+            this.reloadShake.finishBurstDuration -= clampedDeltaRatio * 5.56;
+            
+            if (this.reloadShake.finishBurstDuration <= 0) {
+                this.reloadShake.finishBurstDuration = 0;
+                this.reloadShake.isFinishBurst = false;
+            }
+        }
+    }
+    
+    getReloadShakeOffset() {
+        let offsetX = 0;
+        let offsetY = 0;
+        
+        // Основное покачивание при перезарядке (синусоидальное)
+        if (this.reloadShake.active && !this.reloadShake.isFinishBurst && this.reloadShake.duration > 0) {
+            const phase = ((Date.now() % 1000) / 1000) * Math.PI * 2 * 3; // 3 цикла за секунду
+            offsetX = Math.sin(phase) * this.reloadShake.maxOffset;
+            offsetY = Math.cos(phase * 0.7) * this.reloadShake.maxOffset * 0.5;
+        }
+        
+        // Финишная вспышка при завершении перезарядки
+        if (this.reloadShake.isFinishBurst && this.reloadShake.finishBurstDuration > 0) {
+            const progress = 1 - (this.reloadShake.finishBurstDuration / this.reloadShake.finishBurstTotalDuration);
+            const decayFactor = Math.exp(-4 * progress);
+            
+            // Резкий импульс вверх (как щелчок магазина)
+            offsetY += this.reloadShake.finishBurstMaxOffset * decayFactor;
+            
+            // Небольшая случайная компонента по X для реалистичности
+            offsetX += Math.sin(progress * 25) * this.reloadShake.finishBurstMaxOffset * 0.5 * decayFactor;
+        }
+        
+        return { x: offsetX, y: offsetY };
+    }
     
     renderScore(ctx, width, coinsCollected) {
         const margin = 20;
@@ -1000,6 +1322,25 @@ export class GameRenderer {
         ctx.fillRect(x - textWidth - 10, y - 20, textWidth + 20, 35);
         
         ctx.fillStyle = '#FFD700';
+        ctx.textAlign = 'right';
+        ctx.fillText(text, x - 10, y + 10);
+        
+        ctx.textAlign = 'left';
+    }
+    
+    renderLevel(ctx, width, currentLevel) {
+        const margin = 20;
+        const x = width - margin;
+        const y = 60; // Под уровнем монет
+        
+        const text = `Уровень: ${currentLevel}`;
+        ctx.font = 'bold 24px Arial';
+        const textWidth = ctx.measureText(text).width;
+        
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+        ctx.fillRect(x - textWidth - 10, y - 20, textWidth + 20, 35);
+        
+        ctx.fillStyle = '#00BFFF';
         ctx.textAlign = 'right';
         ctx.fillText(text, x - 10, y + 10);
         
@@ -1045,19 +1386,56 @@ export class GameRenderer {
         ctx.textAlign = 'left';
     }
     
-    renderGameOver(ctx, width, height, isVictory, coinsCollected, enemiesKilled) {
+    renderGameOver(ctx, width, height, isVictory, coinsCollected, enemiesKilled, currentLevel) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
         ctx.fillRect(0, 0, width, height);
         
-        ctx.fillStyle = isVictory ? '#00FF00' : '#FF0000';
-        ctx.font = 'bold 48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(isVictory ? 'VICTORY!' : 'GAME OVER', width / 2, height / 2 - 80);
-        
-        ctx.fillStyle = '#FFFFFF';
-        ctx.font = '24px Arial';
-        ctx.fillText(`Собранные монеты: ${coinsCollected}`, width / 2, height / 2 - 20);
-        ctx.fillText(`Убито врагов: ${enemiesKilled}`, width / 2, height / 2 + 20);
+        // Центральный текст
+        if (isVictory) {
+            if (currentLevel >= 10) {
+                // Полный финал игры
+                ctx.fillStyle = '#FFD700';
+                ctx.font = 'bold 48px Arial';
+                ctx.fillText('🏆 ПОЛНАЯ ПОБЕДА! 🏆', width / 2, height / 2 - 100);
+                
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '28px Arial';
+                ctx.fillText('Вы прошли все 10 уровней!', width / 2, height / 2 - 50);
+                ctx.fillText('Игра пройдена!', width / 2, height / 2 - 10);
+            } else {
+                // Уровень пройден
+                ctx.fillStyle = '#00FF00';
+                ctx.font = 'bold 48px Arial';
+                ctx.fillText(`VICTORY!`, width / 2, height / 2 - 100);
+                
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '28px Arial';
+                ctx.fillText(`Уровень ${currentLevel} пройден!`, width / 2, height / 2 - 50);
+                
+                ctx.font = '24px Arial';
+                ctx.fillText(`Собранные монеты: ${coinsCollected}`, width / 2, height / 2);
+                ctx.fillText(`Убито врагов: ${enemiesKilled}`, width / 2, height / 2 + 30);
+                
+                ctx.fillStyle = '#FFFF00';
+                ctx.font = '20px Arial';
+                ctx.fillText('Нажмите ENTER или кликните для перехода на следующий уровень', width / 2, height / 2 + 70);
+            }
+        } else {
+            // Game Over
+            ctx.fillStyle = '#FF0000';
+            ctx.font = 'bold 48px Arial';
+            ctx.fillText('GAME OVER', width / 2, height / 2 - 80);
+            
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '24px Arial';
+            ctx.fillText(`Уровень: ${currentLevel}`, width / 2, height / 2 - 30);
+            ctx.fillText(`Собранные монеты: ${coinsCollected}`, width / 2, height / 2 + 10);
+            ctx.fillText(`Убито врагов: ${enemiesKilled}`, width / 2, height / 2 + 40);
+            
+            ctx.fillStyle = '#FFAA00';
+            ctx.font = '20px Arial';
+            ctx.fillText('Нажмите ENTER или кликните для начала заново', width / 2, height / 2 + 80);
+        }
         
         ctx.textAlign = 'left';
     }
