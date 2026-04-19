@@ -7,6 +7,7 @@ import { AudioManager } from './AudioManager.js';
 import { Player } from './Player.js';
 import { Enemy } from './Enemy.js';
 import { GameRenderer } from './GameRenderer.js';
+import { TouchController } from './TouchController.js';
 
 // Константы
 const TILE_SIZE = 64;
@@ -107,6 +108,44 @@ export class Game {
         
         // Настройка слушателей событий
         this.setupEventListeners();
+        this.initTouchController();
+    }
+    
+    /**
+     * Инициализация сенсорного контроллера
+     */
+    initTouchController() {
+        this.touchController = new TouchController(this.canvas, {
+            onLeftStickChanged: (x, y) => {
+                // Данные джойстика будут применяться в updateControllerData()
+                this.touchStickX = x;
+                this.touchStickY = y;
+            },
+            onShot: () => {
+                if (!this.isGameOver) {
+                    this.shoot();
+                }
+            },
+            onReload: () => {
+                if (!this.isGameOver) {
+                    this.reloadWeapon();
+                }
+            },
+            onCameraRotation: (rotation) => {
+                if (!this.isGameOver) {
+                    this.player.angle += rotation;
+                    // Нормализация угла
+                    if (this.player.angle < 0) this.player.angle += Math.PI * 2;
+                    if (this.player.angle >= Math.PI * 2) this.player.angle -= Math.PI * 2;
+                }
+            }
+        });
+        
+        // Инициализация переменных для тач-данных
+        this.touchStickX = 0;
+        this.touchStickY = 0;
+        this.touchCameraRotationAccum = 0;
+        this.touchIsCameraHolding = false;
     }
     
     /**
@@ -812,9 +851,25 @@ export class Game {
     }
     
     /**
-     * Чтение данных от геймпада
+     * Чтение данных от геймпада и тач-контроллера
      */
     updateControllerData() {
+        // Сброс данных
+        this.controllerData.connected = false;
+        this.controllerData.leftStickX = 0;
+        this.controllerData.leftStickY = 0;
+        this.controllerData.rightStickX = 0;
+        this.controllerData.rightStickY = 0;
+        
+        // Получаем данные от тач-контроллера (если есть)
+        if (this.touchController && this.touchController.isActive()) {
+            this.controllerData.connected = true;
+            const touchData = this.touchController.getControllerData();
+            this.controllerData.leftStickX = touchData.leftStickX;
+            this.controllerData.leftStickY = touchData.leftStickY;
+        }
+        
+        // Получаем данные от геймпада (если подключён)
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : null;
         if (!gamepads) return;
         
@@ -1253,6 +1308,11 @@ export class Game {
             this.MAP, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, this.enemies, this.loot, this.coins,
             this.coinsCollected, 0, this.player.health, this.isGameOver, this.gameOverTime, this.gameOverIsWin, this.enemiesKilled, this.currentLevel
         );
+        
+        // Отрисовка визуальных элементов тач-контроллера
+        if (this.touchController && this.touchController.isActive()) {
+            this.touchController.render(this.ctx);
+        }
     }
     
     /**
