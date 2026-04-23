@@ -25,19 +25,16 @@ export class TouchController {
         this.rightArea = {
             active: false,
             touchId: null,
-            prevX: 0,          // Предыдущая позиция X для вычисления дельты
-            prevY: 0,          // Предыдущая позиция Y для вычисления дельты
+            prevX: 0,      // Предыдущая позиция X для вычисления дельты
+            prevY: 0,      // Предыдущая позиция Y для вычисления дельты
             currentX: 0,
             currentY: 0,
-            accumulatedDelta: 0,  // Накопленная дельта за весь кадр (сбрасывается каждый кадр)
-            tapDetected: false,   // Было ли это касание определено как тап
-            movedDistance: 0,     // Насколько палец сдвинулся от точки касания
-            touchStartX: 0,       // Начальная X для порога тапа
-            touchStartY: 0        // Начальная Y для порога тапа
+            delta: 0,      // Дельта перемещения по X за текущий кадр (для поворота камеры)
+            tapDetected: false,  // Было ли это касание определено как тап
+            movedDistance: 0,    // Насколько палец сдвинулся от точки касания
+            touchStartX: 0,     // Начальная X для порога тапа
+            touchStartY: 0      // Начальная Y для порога тапа
         };
-        
-        // Чувствительность поворота камеры от тач-ведения
-        this.touchRotateSensitivity = 0.004;
         
         // Выстрел (тап в правой области без значительного движения)
         this.triggerShoot = false;
@@ -149,7 +146,7 @@ export class TouchController {
                 this.rightArea.prevY = y;
                 this.rightArea.currentX = x;
                 this.rightArea.currentY = y;
-                this.rightArea.accumulatedDelta = 0;
+                this.rightArea.delta = 0;
                 this.rightArea.tapDetected = false;
                 this.rightArea.movedDistance = 0;
                 this.rightArea.touchStartX = x;
@@ -201,10 +198,10 @@ export class TouchController {
                 this.leftStick.normY = dy / this.stickMaxRadius;
             }
             
-            // Правая область — камера (ведение пальцем: накапливаем дельту за кадр)
+            // Правая область — камера (ведение пальцем: дельта перемещения)
             if (this.rightArea.active && this.rightArea.touchId === id) {
-                // Вычисляем дельту от предыдущей позиции и накапливаем
-                this.rightArea.accumulatedDelta += x - this.rightArea.prevX;
+                // Вычисляем дельту от предыдущей позиции
+                this.rightArea.delta = x - this.rightArea.prevX;
                 
                 // Обновляем текущее и предыдущее положение
                 this.rightArea.prevX = x;
@@ -253,7 +250,7 @@ export class TouchController {
                 
                 this.rightArea.active = false;
                 this.rightArea.touchId = null;
-                this.rightArea.accumulatedDelta = 0;
+                this.rightArea.delta = 0;
                 this.rightArea.movedDistance = 0;
             }
         }
@@ -288,7 +285,7 @@ export class TouchController {
             connected: this.isConnected,
             leftStickX: leftX,
             leftStickY: leftY,
-            rightStickX: this.rightArea.accumulatedDelta,  // Накопленная дельта за кадр (пиксели)
+            rightStickX: this.rightArea.delta,   // Дельта перемещения по X (пиксели за кадр)
             rightStickY: 0,
             runButton: this.runButton,
             triggerButton: this.triggerButton,  // Будет true только один кадр при тапе
@@ -303,9 +300,6 @@ export class TouchController {
     clearShootTrigger() {
         this.triggerShoot = false;
         this.triggerButton = false;
-        // Критически важно: сбрасываем накопленную дельты КАЖДЫЙ кадр
-        // (иначе камера продолжит крутиться на остаточном значении)
-        this.rightArea.accumulatedDelta = 0;
     }
     
     /* ===================== RENDER ===================== */
@@ -445,7 +439,7 @@ export class TouchController {
         
         this.rightArea.active = false;
         this.rightArea.touchId = null;
-        this.rightArea.accumulatedDelta = 0;
+        this.rightArea.delta = 0;
         this.rightArea.movedDistance = 0;
         
         this.triggerShoot = false;
