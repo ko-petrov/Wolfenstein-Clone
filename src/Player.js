@@ -122,7 +122,7 @@ export class Player {
                 this.angle += rightStickX * this.rotSpeed * 3;
             } else if (Math.abs(rightStickX) > 0) {
                 // Тач-контроллер: дельта в пикселях (малые значения, прошедшие через дедзону тача)
-                this.angle += rightStickX * this.mouseSensitivity;
+                this.angle += rightStickX * this.touchCameraSensitivity;
             }
         }
         

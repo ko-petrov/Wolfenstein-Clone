@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="mobile-web-app-capable" content="yes">
     <title>Wolfenstein Clone - Raycaster</title>
     <style>
@@ -35,6 +36,32 @@
             image-rendering: pixelated;
             image-rendering: crisp-edges;
             touch-action: none;
+        }
+        /* Fullscreen на мобильных - canvas на весь экран */
+        body.fullscreen canvas {
+            border: none;
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: cover;
+        }
+        /* Кнопка полного экрана (только на тач-устройствах) */
+        #fullscreenBtn {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        #fullscreenBtn:active {
+            background: rgba(255, 255, 255, 0.3);
         }
         /* Crosshair */
         .crosshair {
@@ -80,6 +107,68 @@
 <body>
     <canvas id="gameCanvas"></canvas>
     <div id="crosshair" class="crosshair"></div>
+    <button id="fullscreenBtn">⛶ Полный экран</button>
     <script type="module" src="main.js"></script>
+    <script>
+        // Автоматический переход в полноэкранный режим на мобильных
+        (function() {
+            const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+            
+            if (isTouchDevice) {
+                // Показываем кнопку полного экрана
+                const btn = document.getElementById('fullscreenBtn');
+                btn.style.display = 'block';
+                
+                // Функция входа в полный экран
+                function enterFullscreen() {
+                    const elem = document.documentElement;
+                    if (elem.requestFullscreen) {
+                        elem.requestFullscreen().catch(() => {});
+                    } else if (elem.webkitRequestFullscreen) {
+                        elem.webkitRequestFullscreen();
+                    } else if (elem.webkitRequestFullScreen) {
+                        elem.webkitRequestFullScreen();
+                    } else if (elem.msRequestFullscreen) {
+                        elem.msRequestFullscreen();
+                    }
+                }
+                
+                // Пытаемся автоматически войти в полный экран при первом касании
+                let autoFullscreenAttempted = false;
+                function tryAutoFullscreen(e) {
+                    if (!autoFullscreenAttempted) {
+                        autoFullscreenAttempted = true;
+                        enterFullscreen();
+                        document.body.classList.add('fullscreen');
+                        btn.style.display = 'none';
+                    }
+                }
+                
+                // Слушаем первое касание для входа в полный экран
+                document.addEventListener('touchstart', tryAutoFullscreen, { once: true });
+                
+                // Кнопка тоже вызывает полный экран
+                btn.addEventListener('click', enterFullscreen);
+                btn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    enterFullscreen();
+                });
+                
+                // при изменении размера/ориентации проверяем fullsceen
+                window.addEventListener('resize', () => {
+                    if (isFullscreenNow()) {
+                        document.body.classList.add('fullscreen');
+                    }
+                });
+            }
+            
+            function isFullscreenNow() {
+                return document.fullscreenElement ||
+                       document.webkitFullscreenElement ||
+                       document.webkitCurrentFullScreenElement ||
+                       document.mozFullScreenElement;
+            }
+        })();
+    </script>
 </body>
 </html>

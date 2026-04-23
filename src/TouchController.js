@@ -2,7 +2,7 @@
  * Тач-управление с двумя зонами:
  * - Левая половина: джойстик движения (сильный наклон = бег)
  * - Правая половина: тап = выстрел, удержание+движение = камера
- * - Кнопка перезарядки: видима справа
+ * - Кнопка перезарядки: видима справа вверху
  */
 export class TouchController {
     constructor(canvas) {
@@ -60,6 +60,9 @@ export class TouchController {
             radius: 32
         };
         
+        // Mapping touchId -> action для корректного отслеживания между событиями
+        this.touchActions = new Map();
+        
         // Флаг тач-устройства
         this.isConnected = false;
         
@@ -81,14 +84,14 @@ export class TouchController {
     }
     
     /**
-     * Позиция кнопки перезарядки
+     * Позиция кнопки перезарядки (правыйверхний угол)
      */
     updateReloadButton() {
         const w = this.canvas.width;
         const h = this.canvas.height;
         
-        this.reloadButton.x = w - 70;
-        this.reloadButton.y = h - 90;
+        this.reloadButton.x = w - 60;
+        this.reloadButton.y = 80;
     }
     
     /**
@@ -118,8 +121,7 @@ export class TouchController {
             if (this.isInsideReloadButton(x, y)) {
                 this.bButton = true;
                 this.reloadButtonHeld = true;
-                // Сохраним touchId чтобы отслеживать окончание
-                touch._action = 'reload';
+                this.touchActions.set(id, 'reload');
                 continue;
             }
             
@@ -134,7 +136,7 @@ export class TouchController {
                 this.leftStick.normX = 0;
                 this.leftStick.normY = 0;
                 this.leftStick.rawDistance = 0;
-                touch._action = 'leftStick';
+                this.touchActions.set(id, 'leftStick');
                 continue;
             }
             
@@ -152,7 +154,7 @@ export class TouchController {
                 this.rightArea.touchStartX = x;
                 this.rightArea.touchStartY = y;
                 
-                touch._action = 'rightArea';
+                this.touchActions.set(id, 'rightArea');
                 continue;
             }
             
@@ -223,15 +225,16 @@ export class TouchController {
         
         for (const touch of e.changedTouches) {
             const id = touch.identifier;
+            const action = this.touchActions.get(id);
             
             // Кнопка перезарядки
-            if (touch._action === 'reload') {
+            if (action === 'reload') {
                 this.bButton = false;
                 this.reloadButtonHeld = false;
             }
             
             // Левый стик
-            if (this.leftStick.active && this.leftStick.touchId === id) {
+            if (action === 'leftStick' || (this.leftStick.active && this.leftStick.touchId === id)) {
                 this.leftStick.active = false;
                 this.leftStick.touchId = null;
                 this.leftStick.normX = 0;
@@ -241,7 +244,7 @@ export class TouchController {
             }
             
             // Правая область
-            if (this.rightArea.active && this.rightArea.touchId === id) {
+            if (action === 'rightArea' || (this.rightArea.active && this.rightArea.touchId === id)) {
                 // Если палец практически не двигался — это ТАП = ВЫСТРЕЛ
                 if (this.rightArea.movedDistance < this.tapThreshold) {
                     this.triggerShoot = true;
@@ -253,11 +256,15 @@ export class TouchController {
                 this.rightArea.delta = 0;
                 this.rightArea.movedDistance = 0;
             }
+            
+            // Удаляем действие из карты
+            this.touchActions.delete(id);
         }
     }
     
     handleTouchCancel(e) {
         e.preventDefault();
+        this.touchActions.clear();
         this.reset();
     }
     
@@ -447,5 +454,7 @@ export class TouchController {
         this.runButton = false;
         this.bButton = false;
         this.reloadButtonHeld = false;
+        
+        this.touchActions.clear();
     }
 }
