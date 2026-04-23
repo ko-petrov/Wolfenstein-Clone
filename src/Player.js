@@ -113,10 +113,16 @@ export class Player {
                 forwardSpeed = this.runSpeed;
             }
             
-            // Вращение камеры от правого стика
+            // Вращение камеры от правого стика / тач-дельты
+            // Для геймпада: rightStickX в диапазоне [-1, 1], используется rotSpeed
+            // Для тач-контроллера: rightStickX = дельта пикселей, используется mouseSensitivity
             const rightStickX = controllerData.rightStickX;
             if (Math.abs(rightStickX) > stickDeadZone) {
+                // Геймпад: нормализованное значение [-1, 1]
                 this.angle += rightStickX * this.rotSpeed * 3;
+            } else if (Math.abs(rightStickX) > 0) {
+                // Тач-контроллер: дельта в пикселях (малые значения, прошедшие через дедзону тача)
+                this.angle += rightStickX * this.mouseSensitivity;
             }
         }
         

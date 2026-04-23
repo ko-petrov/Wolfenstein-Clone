@@ -21,17 +21,19 @@ export class TouchController {
             rawDistance: 0  // Сырое расстояние от центра для определения бега
         };
         
-        // Правый джойстик (камера)
-        this.rightStick = {
+        // Правая область (камера + выстрел)
+        this.rightArea = {
             active: false,
             touchId: null,
-            baseX: 0,
-            baseY: 0,
+            prevX: 0,      // Предыдущая позиция X для вычисления дельты
+            prevY: 0,      // Предыдущая позиция Y для вычисления дельты
             currentX: 0,
             currentY: 0,
-            normX: 0,
-            normY: 0,
-            movedDistance: 0  // Насколько палец сдвинулся от точки касания
+            delta: 0,      // Дельта перемещения по X за текущий кадр (для поворота камеры)
+            tapDetected: false,  // Было ли это касание определено как тап
+            movedDistance: 0,    // Насколько палец сдвинулся от точки касания
+            touchStartX: 0,     // Начальная X для порога тапа
+            touchStartY: 0      // Начальная Y для порога тапа
         };
         
         // Выстрел (тап в правой области без значительного движения)
@@ -136,22 +138,21 @@ export class TouchController {
                 continue;
             }
             
-            // 3. Правая половина — тап или камера
-            if (x >= halfX && !this.rightStick.active) {
-                this.rightStick.active = true;
-                this.rightStick.touchId = id;
-                this.rightStick.baseX = x;
-                this.rightStick.baseY = y;
-                this.rightStick.currentX = x;
-                this.rightStick.currentY = y;
-                this.rightStick.normX = 0;
-                this.rightStick.normY = 0;
-                this.rightStick.movedDistance = 0;
+            // 3. Правая половина — тап или камера (ведение пальцем)
+            if (x >= halfX && !this.rightArea.active) {
+                this.rightArea.active = true;
+                this.rightArea.touchId = id;
+                this.rightArea.prevX = x;
+                this.rightArea.prevY = y;
+                this.rightArea.currentX = x;
+                this.rightArea.currentY = y;
+                this.rightArea.delta = 0;
+                this.rightArea.tapDetected = false;
+                this.rightArea.movedDistance = 0;
+                this.rightArea.touchStartX = x;
+                this.rightArea.touchStartY = y;
                 
-                // Важно: ещё не знаем — тап это или движение.
-                // Определим по movedDistance когда палец сдвинется или отпустят.
                 touch._action = 'rightArea';
-                touch._tapDetected = false;
                 continue;
             }
             
@@ -197,26 +198,22 @@ export class TouchController {
                 this.leftStick.normY = dy / this.stickMaxRadius;
             }
             
-            // Правая область — камера
-            if (this.rightStick.active && this.rightStick.touchId === id) {
-                let dx = x - this.rightStick.baseX;
-                let dy = y - this.rightStick.baseY;
+            // Правая область — камера (ведение пальцем: дельта перемещения)
+            if (this.rightArea.active && this.rightArea.touchId === id) {
+                // Вычисляем дельту от предыдущей позиции
+                this.rightArea.delta = x - this.rightArea.prevX;
                 
-                // Вычислим общее расстояние движения (апдейтим не макс, а текущее)
+                // Обновляем текущее и предыдущее положение
+                this.rightArea.prevX = x;
+                this.rightArea.prevY = y;
+                this.rightArea.currentX = x;
+                this.rightArea.currentY = y;
+                
+                // Вычисляем расстояние от начальной точки касания
+                const dx = x - this.rightArea.touchStartX;
+                const dy = y - this.rightArea.touchStartY;
                 const currentMovedDist = Math.sqrt(dx * dx + dy * dy);
-                this.rightStick.movedDistance = Math.max(this.rightStick.movedDistance, currentMovedDist);
-                
-                // Ограничиваем радиус для нормализации
-                if (currentMovedDist > this.stickMaxRadius) {
-                    const scale = this.stickMaxRadius / currentMovedDist;
-                    dx *= scale;
-                    dy *= scale;
-                }
-                
-                this.rightStick.currentX = x;
-                this.rightStick.currentY = y;
-                this.rightStick.normX = dx / this.stickMaxRadius;
-                this.rightStick.normY = dy / this.stickMaxRadius;
+                this.rightArea.movedDistance = Math.max(this.rightArea.movedDistance, currentMovedDist);
             }
         }
     }
@@ -244,18 +241,17 @@ export class TouchController {
             }
             
             // Правая область
-            if (this.rightStick.active && this.rightStick.touchId === id) {
+            if (this.rightArea.active && this.rightArea.touchId === id) {
                 // Если палец практически не двигался — это ТАП = ВЫСТРЕЛ
-                if (this.rightStick.movedDistance < this.tapThreshold && !touch._tapDetected) {
+                if (this.rightArea.movedDistance < this.tapThreshold) {
                     this.triggerShoot = true;
                     this.triggerButton = true;
                 }
                 
-                this.rightStick.active = false;
-                this.rightStick.touchId = null;
-                this.rightStick.normX = 0;
-                this.rightStick.normY = 0;
-                this.rightStick.movedDistance = 0;
+                this.rightArea.active = false;
+                this.rightArea.touchId = null;
+                this.rightArea.delta = 0;
+                this.rightArea.movedDistance = 0;
             }
         }
     }
@@ -289,8 +285,8 @@ export class TouchController {
             connected: this.isConnected,
             leftStickX: leftX,
             leftStickY: leftY,
-            rightStickX: this.rightStick.normX,
-            rightStickY: this.rightStick.normY,
+            rightStickX: this.rightArea.delta,   // Дельта перемещения по X (пиксели за кадр)
+            rightStickY: 0,
             runButton: this.runButton,
             triggerButton: this.triggerButton,  // Будет true только один кадр при тапе
             aButton: false,
@@ -319,19 +315,18 @@ export class TouchController {
             this.drawStickHint(ctx, width * 0.15, height - 130, 'WASD');
         }
         
-        // Правый стик (камера) — рисуем только при активном движении
-        if (this.rightStick.active && this.rightStick.movedDistance >= this.tapThreshold) {
-            this.drawJoystick(ctx, this.rightStick.baseX, this.rightStick.baseY,
-                this.rightStick.normX, this.rightStick.normY, false);
-        } else if (!this.rightStick.active) {
+        // Правая область (камера) — рисуем индикатор при активном движении
+        if (this.rightArea.active && this.rightArea.movedDistance >= this.tapThreshold) {
+            this.drawStickHint(ctx, width * 0.85, height - 130, 'CAMERA');
+        } else if (!this.rightArea.active) {
             this.drawStickHint(ctx, width * 0.85, height - 130, 'CAMERA');
         }
         
         // Кнопка перезарядки
         this.drawReloadButton(ctx);
         
-        // Подсказка "тап = огонь" справа (только когда не активен правый стик)
-        if (!this.rightStick.active) {
+        // Подсказка "тап = огонь" справа (только когда не активна правая область)
+        if (!this.rightArea.active) {
             ctx.save();
             ctx.globalAlpha = 0.2;
             ctx.fillStyle = '#fff';
@@ -442,11 +437,10 @@ export class TouchController {
         this.leftStick.normY = 0;
         this.leftStick.rawDistance = 0;
         
-        this.rightStick.active = false;
-        this.rightStick.touchId = null;
-        this.rightStick.normX = 0;
-        this.rightStick.normY = 0;
-        this.rightStick.movedDistance = 0;
+        this.rightArea.active = false;
+        this.rightArea.touchId = null;
+        this.rightArea.delta = 0;
+        this.rightArea.movedDistance = 0;
         
         this.triggerShoot = false;
         this.triggerButton = false;
