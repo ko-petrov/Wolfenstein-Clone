@@ -68,6 +68,11 @@ export class Game {
         // Pointer Lock
         this.isPointerLocked = false;
         
+        // Touch Controller
+        this.touchController = new TouchController(canvas);
+        this.lastTouchShoot = false;
+        this.lastTouchReload = false;
+        
         // Gamepad
         this.controllerData = {
             connected: false,
@@ -108,44 +113,6 @@ export class Game {
         
         // Настройка слушателей событий
         this.setupEventListeners();
-        this.initTouchController();
-    }
-    
-    /**
-     * Инициализация сенсорного контроллера
-     */
-    initTouchController() {
-        this.touchController = new TouchController(this.canvas, {
-            onLeftStickChanged: (x, y) => {
-                // Данные джойстика будут применяться в updateControllerData()
-                this.touchStickX = x;
-                this.touchStickY = y;
-            },
-            onShot: () => {
-                if (!this.isGameOver) {
-                    this.shoot();
-                }
-            },
-            onReload: () => {
-                if (!this.isGameOver) {
-                    this.reloadWeapon();
-                }
-            },
-            onCameraRotation: (rotation) => {
-                if (!this.isGameOver) {
-                    this.player.angle += rotation;
-                    // Нормализация угла
-                    if (this.player.angle < 0) this.player.angle += Math.PI * 2;
-                    if (this.player.angle >= Math.PI * 2) this.player.angle -= Math.PI * 2;
-                }
-            }
-        });
-        
-        // Инициализация переменных для тач-данных
-        this.touchStickX = 0;
-        this.touchStickY = 0;
-        this.touchCameraRotationAccum = 0;
-        this.touchIsCameraHolding = false;
     }
     
     /**
@@ -851,25 +818,9 @@ export class Game {
     }
     
     /**
-     * Чтение данных от геймпада и тач-контроллера
+     * Чтение данных от геймпада
      */
     updateControllerData() {
-        // Сброс данных
-        this.controllerData.connected = false;
-        this.controllerData.leftStickX = 0;
-        this.controllerData.leftStickY = 0;
-        this.controllerData.rightStickX = 0;
-        this.controllerData.rightStickY = 0;
-        
-        // Получаем данные от тач-контроллера (если есть)
-        if (this.touchController && this.touchController.isActive()) {
-            this.controllerData.connected = true;
-            const touchData = this.touchController.getControllerData();
-            this.controllerData.leftStickX = touchData.leftStickX;
-            this.controllerData.leftStickY = touchData.leftStickY;
-        }
-        
-        // Получаем данные от геймпада (если подключён)
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : null;
         if (!gamepads) return;
         
@@ -960,19 +911,48 @@ export class Game {
     }
     
     /**
+     * Обработка тач-контроллера
+     */
+    updateTouchController() {
+        const touchData = this.touchController.getControllerData();
+        if (!touchData.connected) return;
+        
+        // Стрельба (только при нажатии)
+        if (touchData.triggerButton && !this.lastTouchShoot) {
+            if (!this.isGameOver) {
+                this.shoot();
+            } else {
+                const timeSinceDeath = Date.now() - this.gameOverTime;
+                if (timeSinceDeath >= GAME_OVER_DELAY) {
+                    if (this.gameOverIsWin) this.nextLevel();
+                    else this.respawnPlayer();
+                }
+            }
+        }
+        this.lastTouchShoot = touchData.triggerButton;
+        
+        // Перезарядка (только при нажатии)
+        if (touchData.bButton && !this.lastTouchReload) {
+            if (!this.isGameOver) this.reloadWeapon();
+        }
+        this.lastTouchReload = touchData.bButton;
+    }
+
+    /**
      * Обновление игры
      */
     update(deltaTime) {
-        // Ограничиваем deltaTime максимальной величиной для предотвращения скачков
-        const clampedDeltaTime = Math.min(deltaTime, 100); // максимум 100мс
+        const clampedDeltaTime = Math.min(deltaTime, 100);
         
-        // Обновление данных геймпада (всегда, включая экран Game Over)
         this.updateControllerData();
+        this.updateTouchController();
         
         if (this.isGameOver) return;
         
-        // Обновление игрока (с учётом deltaTime и контроллера)
-        const movement = this.player.update(this.keys, (newX, newY) => this.checkCollision(newX, newY), clampedDeltaTime, this.controllerData);
+        const touchData = this.touchController.getControllerData();
+        const effectiveController = touchData.connected ? touchData : this.controllerData;
+        
+        const movement = this.player.update(this.keys, (newX, newY) => this.checkCollision(newX, newY), clampedDeltaTime, effectiveController);
         
         // Обновление bobbing и звука шагов
         this.player.bobbing.isMoving = movement.isMoving;
@@ -1268,6 +1248,7 @@ export class Game {
         this.regenStarted = false;
         
         this.renderer.reset();
+        this.touchController.reset();
         
         this.generateLevel();
         
@@ -1309,10 +1290,8 @@ export class Game {
             this.coinsCollected, 0, this.player.health, this.isGameOver, this.gameOverTime, this.gameOverIsWin, this.enemiesKilled, this.currentLevel
         );
         
-        // Отрисовка визуальных элементов тач-контроллера
-        if (this.touchController && this.touchController.isActive()) {
-            this.touchController.render(this.ctx);
-        }
+        // Отрисовка тач-контроллера (джойстики и кнопки поверх игры)
+        this.touchController.render(this.ctx, this.width, this.height);
     }
     
     /**

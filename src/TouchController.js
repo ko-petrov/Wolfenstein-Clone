@@ -1,560 +1,489 @@
 /**
- * Контроллер сенсорного управления для мобильных устройств
- * Все измерения указаны в реальных миллиметрах (мм)
- * Пиксели конвертируются в мм через DPI экрана
+ * Класс для тач-управления с двумя виртуальными джойстиками
+ * Левый джойстик — движение (вперёд/назад, стрейф)
+ * Правый джойстик — вращение камеры
+ * Кнопки — стрельба, перезарядка, бег
  */
-
-// Конвертация пикселей в миллиметры (стандарт: 1mm = 1/25.4 inch, 1 inch = 96 CSS px)
-// mmToPixels: (mm * DPI) / 25.4
-// pixelsToMM: (px * 25.4) / DPI
-const getDPI = () => {
-    const screenDPI = window.devicePixelRatio * 96; // 96 CSS px = 1 inch
-    return screenDPI;
-};
-
-const pxToMM = (px) => (px * 25.4) / getDPI();
-const mmToPx = (mm) => (mm * getDPI()) / 25.4;
-
-// Константы в миллиметрах
-const JOYSTICK_MAX_RADIUS_MM = 50;     // Макс радиус джойстика
-const JOYSTICK_DEADZONE_MM = 5;       // Мёртвая зона
-const JOYSTICK_RADIUS_MM = 80;        // Визуальный размер зоны
-const JOYSTICK_THUMB_MM = 30;         // Визуальный размер "пальца" джойстика
-const CLICK_MAX_MOVE_MM = 10;         // Макс смещение для клика
-const CLICK_MAX_TIME_MS = 200;        // Макс время для клика
-const HOLD_START_TIME_MS = 500;       // Время удержания перед поворотом камеры
-const RELOAD_SWIPE_MIN_DISTANCE_MM = 30; // Мин дистанция свайпа
-const RELOAD_SWIPE_MAX_HORIZONTAL_MM = 20; // Макс горизонтальное смещение
-const RELOAD_SWIPE_MAX_TIME_MS = 500;     // Макс время свайпа
-const CAMERA_ROTATION_SENSITIVITY = 0.0025; // радиан на мм
-
 export class TouchController {
-    constructor(canvas, options = {}) {
+    constructor(canvas) {
         this.canvas = canvas;
         
-        // Настройки зон (в мм)
-        this.joystickZoneWidthMM = options.joystickZoneWidthMM || 33.33; // 1/3 экрана
-        this.actionZoneWidthMM = options.actionZoneWidthMM || 66.67;     // 2/3 экрана
-        
-        // Состояние джойстика
-        this.joystick = {
+        // Состояние джойстиков
+        this.leftStick = {
             active: false,
-            startX: 0,     // В пикселях
-            startY: 0,
-            currentX: 0,
-            currentY: 0,
-            stickX: 0,     // Нормализованный [-1, 1]
-            stickY: 0,
-            touchId: null
-        };
-        
-        // Состояние зоны действий (правые 2/3)
-        this.action = {
-            active: false,
-            startTime: 0,
-            holdStartTime: 0,
-            startX: 0,
-            startY: 0,
-            currentX: 0,
-            currentY: 0,
-            lastMoveX: 0,
-            lastMoveY: 0,
-            isHolding: false,
-            isCameraMode: false,
-            shotTriggered: false,
-            touchId: null
-        };
-        
-        // Детектор свайпа перезарядки
-        this.swipe = {
-            active: false,
-            startX: 0,
-            startY: 0,
-            startTime: 0,
             touchId: null,
-            triggered: false
+            baseX: 0,      // Базовая позиция центра джойстика (где был первый тач)
+            baseY: 0,
+            currentX: 0,   // Текущая позиция пальца
+            currentY: 0,
+            normX: 0,      // Нормализованное значение X: [-1, 1]
+            normY: 0       // Нормализованное значение Y: [-1, 1]
         };
         
-        // Флаг определения тач-устройства
+        this.rightStick = {
+            active: false,
+            touchId: null,
+            baseX: 0,
+            baseY: 0,
+            currentX: 0,
+            currentY: 0,
+            normX: 0,
+            normY: 0
+        };
+        
+        // Кнопки
+        this.buttons = {
+            shoot: false,
+            reload: false,
+            run: false
+        };
+        
+        // Для отслеживания single tap (для стрельбы при одиночном касании справа)
+        this.lastTapTime = 0;
+        this.lastTapX = 0;
+        this.lastTapY = 0;
+        
+        // Радиус джойстика
+        this.stickRadius = 60;      // Максимальный радиус движения джойстика
+        this.stickVisualRadius = 50; // Визуальный радиус основы джойстика
+        this.knobVisualRadius = 25;  // Визуальный радиус "грибка" джойстика
+        
+        // Позиции кнопок (вычисляются при resize)
+        this.buttonPositions = {};
+        
+        // Флаг: тач-устройство или нет
         this.isTouchDevice = false;
         
-        // Конфигурация перезарядки
-        this.reloadConfig = {
-            enabledInActionZone: true  // Только правые 2/3
-        };
+        // Отладка
+        this.debug = false;
         
-        // Callback-и для действий
-        this.onShot = options.onShot || null;
-        this.onReload = options.onReload || null;
-        this.onLeftStickChanged = options.onLeftStickChanged || null;
-        this.onCameraRotation = options.onCameraRotation || null;
-        
-        // Внутренние данные для отрисовки
-        this.visuals = {
-            joystickCenterX: 0,
-            joystickCenterY: 0,
-            joystickThumbX: 0,
-            joystickThumbY: 0,
-            showJoystick: false
-        };
-        
-        // Инициализация
-        this.init();
-    }
-    
-    /**
-     * Инициализация контроллера
-     */
-    init() {
-        this.detectTouchDevice();
-        if (!this.isTouchDevice) return;
-        
+        // Настройка событий
         this.setupEventListeners();
-        this.startRenderLoop();
     }
     
     /**
-     * Определение тач-устройства
-     */
-    detectTouchDevice() {
-        this.isTouchDevice = ('ontouchstart' in window) ||
-                            (navigator.maxTouchPoints > 0) ||
-                            (navigator.msMaxTouchPoints > 0) ||
-                            (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
-        console.log(`[TouchController] Тач-устройство: ${this.isTouchDevice}`);
-    }
-    
-    /**
-     * Настройка слушателей событий
+     * Настройка слушателей тач-событий
      */
     setupEventListeners() {
-        if (!this.isTouchDevice) return;
+        const canvas = this.canvas;
         
-        this.canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
-        this.canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
-        this.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
-        this.canvas.addEventListener('touchcancel', (e) => this.handleTouchCancel(e), { passive: false });
+        // Touch events — используем passive: false чтобы preventDefault работал
+        canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+        canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+        canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e), { passive: false });
+        canvas.addEventListener('touchcancel', (e) => this.handleTouchCancel(e), { passive: false });
+        
+        // Проверяем, тач-устройство ли это
+        if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {
+            this.isTouchDevice = true;
+        }
+        
+        // Обработка ресайза для пересчёта позиций кнопок
+        window.addEventListener('resize', () => this.updateButtonPositions());
+        
+        // Начальные позиции кнопок
+        this.updateButtonPositions();
     }
     
     /**
-     * Обработка начала касания
+     * Обновляет позиции кнопок при изменении размера экрана
+     */
+    updateButtonPositions() {
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        
+        // Кнопка стрельбы — справа внизу, чуть выше перезарядки
+        this.buttonPositions.shoot = {
+            x: w - 80,
+            y: h - 80,
+            radius: 35
+        };
+        
+        // Кнопка перезарядки — справа внизу, ниже стрельбы
+        this.buttonPositions.reload = {
+            x: w - 150,
+            y: h - 120,
+            radius: 28
+        };
+        
+        // Кнопка бега — слева внизу, рядом с левым джойстиком
+        this.buttonPositions.run = {
+            x: 100,
+            y: h - 80,
+            radius: 25
+        };
+    }
+    
+    /**
+     * Определяет, находится ли точка в зоне кнопки
+     */
+    isInsideButton(x, y, buttonName) {
+        const btn = this.buttonPositions[buttonName];
+        if (!btn) return false;
+        const dx = x - btn.x;
+        const dy = y - btn.y;
+        return dx * dx + dy * dy <= btn.radius * btn.radius;
+    }
+    
+    /**
+     * Определяет, в какой половине экрана произошло касание
+     */
+    getScreenHalf(x) {
+        return x < this.canvas.width / 2 ? 'left' : 'right';
+    }
+    
+    /**
+     * Обработка touchstart
      */
     handleTouchStart(e) {
-        if (!this.isTouchDevice) return;
         e.preventDefault();
+        this.isTouchDevice = true;
         
-        for (const touch of e.changedTouches) {
-            const px = touch.clientX;
-            const py = touch.clientY;
-            const mmX = pxToMM(touch.clientX);
-            const mmY = pxToMM(touch.clientY);
+        const touches = Array.from(e.changedTouches);
+        const w = this.canvas.width;
+        const h = this.canvas.height;
+        
+        for (const touch of touches) {
+            const x = touch.clientX;
+            const y = touch.clientY;
             
-            // Проверяем левую треть (джойстик)
-            const screenWidthMM = pxToMM(window.innerWidth);
-            const joystickThresholdMM = screenWidthMM * (this.joystickZoneWidthMM / 100);
-            
-            if (mmX < joystickThresholdMM && this.joystick.touchId === null) {
-                // Начинаем джойстик
-                this.joystick.active = true;
-                this.joystick.touchId = touch.identifier;
-                this.joystick.startX = touch.clientX;
-                this.joystick.startY = touch.clientY;
-                this.joystick.currentX = touch.clientX;
-                this.joystick.currentY = touch.clientY;
-                
-                // Рассчитываем центр джойстика в пикселях
-                this.visuals.joystickCenterX = touch.clientX;
-                this.visuals.joystickCenterY = touch.clientY;
-                this.visuals.joystickThumbX = touch.clientX;
-                this.visuals.joystickThumbY = touch.clientY;
-                this.visuals.showJoystick = true;
-                
-                this.joystick.stickX = 0;
-                this.joystick.stickY = 0;
+            // Проверяем, не нажата ли кнопка
+            if (this.isInsideButton(x, y, 'shoot')) {
+                this.buttons.shoot = true;
+                // Сохраняем как отдельный тач для кнопки
+                touch._buttonType = 'shoot';
+                continue;
             }
-            // Проверяем правые 2/3 (действие)
-            else if (mmX >= joystickThresholdMM && this.action.touchId === null) {
-                this.action.active = true;
-                this.action.touchId = touch.identifier;
-                this.action.startTime = Date.now();
-                this.action.holdStartTime = Date.now();
-                this.action.startX = touch.clientX;
-                this.action.startY = touch.clientY;
-                this.action.currentX = touch.clientX;
-                this.action.currentY = touch.clientY;
-                this.action.lastMoveX = touch.clientX;
-                this.action.lastMoveY = touch.clientY;
-                this.action.isHolding = false;
-                this.action.isCameraMode = false;
-                this.action.shotTriggered = false;
-                
-                // Проверяем возможный свайп перезарядки (только правые 2/3 экрана)
-                // Свайп может начаться в любой части правой зоны, не только сверху
-                const screenHeightMM = pxToMM(window.innerHeight);
-                if (mmY > screenHeightMM * 0.3 && mmY < screenHeightMM * 0.85) {
-                    this.swipe.active = true;
-                    this.swipe.touchId = touch.identifier;
-                    this.swipe.startX = touch.clientX;
-                    this.swipe.startY = touch.clientY;
-                    this.swipe.startTime = Date.now();
-                    this.swipe.triggered = false;
-                }
+            
+            if (this.isInsideButton(x, y, 'reload')) {
+                this.buttons.reload = true;
+                touch._buttonType = 'reload';
+                continue;
+            }
+            
+            if (this.isInsideButton(x, y, 'run')) {
+                this.buttons.run = true;
+                touch._buttonType = 'run';
+                continue;
+            }
+            
+            // Проверяем, какой джойстик активировать
+            const half = this.getScreenHalf(x);
+            
+            if (half === 'left' && !this.leftStick.active) {
+                // Активируем левый джойстик (движение)
+                this.leftStick.active = true;
+                this.leftStick.touchId = touch.identifier;
+                this.leftStick.baseX = x;
+                this.leftStick.baseY = y;
+                this.leftStick.currentX = x;
+                this.leftStick.currentY = y;
+                this.leftStick.normX = 0;
+                this.leftStick.normY = 0;
+            } else if (half === 'right' && !this.rightStick.active) {
+                // Активируем правый джойстик (камера)
+                this.rightStick.active = true;
+                this.rightStick.touchId = touch.identifier;
+                this.rightStick.baseX = x;
+                this.rightStick.baseY = y;
+                this.rightStick.currentX = x;
+                this.rightStick.currentY = y;
+                this.rightStick.normX = 0;
+                this.rightStick.normY = 0;
             }
         }
     }
     
     /**
-     * Обработка движения касания
+     * Обработка touchmove
      */
     handleTouchMove(e) {
-        if (!this.isTouchDevice) return;
         e.preventDefault();
         
-        for (const touch of e.changedTouches) {
-            const touchId = touch.identifier;
-            const px = touch.clientX;
-            const py = touch.clientY;
-            const mmX = pxToMM(touch.clientX);
-            const mmY = pxToMM(touch.clientY);
-            
-            // Обновляем джойстик
-            if (this.joystick.active && touchId === this.joystick.touchId) {
-                this.joystick.currentX = px;
-                this.joystick.currentY = py;
-                
-                // Вычисляем вектор смещения в пикселях
-                let dx = px - this.joystick.startX;
-                let dy = py - this.joystick.startY;
-                
-                // Вычисляем расстояние в мм
-                const distanceMM = Math.sqrt((dx * dx + dy * dy) * (getDPI() / 96) * (getDPI() / 96)) / (25.4 / 1);
-                
-                // Нормализуем если превышена граница
-                const maxRadiusPx = mmToPx(JOYSTICK_MAX_RADIUS_MM);
-                const distancePx = Math.sqrt(dx * dx + dy * dy);
-                
-                if (distancePx > maxRadiusPx) {
-                    dx = (dx / distancePx) * maxRadiusPx;
-                    dy = (dy / distancePx) * maxRadiusPx;
-                }
-                
-                // Применяем мёртвую зону (в мм, конвертируем в пиксели для сравнения)
-                const deadzonePx = mmToPx(JOYSTICK_DEADZONE_MM);
-                const normalizedDistPx = Math.sqrt(dx * dx + dy * dy);
-                
-                if (normalizedDistPx >= deadzonePx) {
-                    // Нормализуем к [-1, 1]
-                    this.joystick.stickX = dx / maxRadiusPx;
-                    this.joystick.stickY = dy / maxRadiusPx;
-                } else {
-                    this.joystick.stickX = 0;
-                    this.joystick.stickY = 0;
-                }
-                
-                // Обновляем визуальное положение
-                this.visuals.joystickThumbX = this.joystick.startX + dx;
-                this.visuals.joystickThumbY = this.joystick.startY + dy;
-            }
-            
-            // Обновляем действие (правые 2/3)
-            if (this.action.active && touchId === this.action.touchId) {
-                this.action.currentX = px;
-                this.action.currentY = py;
-                
-                const timeSinceStart = Date.now() - this.action.startTime;
-                const dx = px - this.action.startX;
-                const dy = py - this.action.startY;
-                const moveDistanceMM = Math.sqrt(dx * dx + dy * dy) / (getDPI() / 96) * (25.4 / 1);
-                
-                // Проверяем движение для режима камеры
-                if (moveDistanceMM > CLICK_MAX_MOVE_MM) {
-                    this.action.isHolding = true;
-                    
-                    // Определяем режим по направлению движения
-                    const absDx = Math.abs(dx) / (getDPI() / 96) * (25.4 / 1);
-                    const absDy = Math.abs(dy) / (getDPI() / 96) * (25.4 / 1);
-                    
-                    if (absDx > absDy && absDx > mmToPx(15) / (25.4 / 1) * (getDPI() / 96)) {
-                        // Горизонтальное движение - режим камеры
-                        this.action.isCameraMode = true;
-                    }
-                }
-                
-                // Если время удержания истекло и мы в режиме камеры
-                if (this.action.isHolding && !this.action.isCameraMode && 
-                    (Date.now() - this.action.holdStartTime) > HOLD_START_TIME_MS && moveDistanceMM > 5) {
-                    // Автоматически переключаем в режим камеры при длительном удержании с движением
-                    const absDx = Math.abs(dx) / (getDPI() / 96) * (25.4 / 1);
-                    const absDy = Math.abs(dy) / (getDPI() / 96) * (25.4 / 1);
-                    if (absDx > absDy) {
-                        this.action.isCameraMode = true;
-                    }
-                }
-                
-                this.action.lastMoveX = px;
-                this.action.lastMoveY = py;
-            }
-            
-            // Обновляем свайп
-            if (this.swipe.active && touchId === this.swipe.touchId) {
-                const swipeDx = px - this.swipe.startX;
-                const swipeDy = py - this.swipe.startY;
-                const swipeTime = Date.now() - this.swipe.startTime;
-                
-                // Проверяем критерии свайпа
-                const swipeDyMM = swipeDy / (getDPI() / 96) * (25.4 / 1);
-                const swipeDxMM = Math.abs(swipeDx) / (getDPI() / 96) * (25.4 / 1);
-                const swipeDistanceMM = Math.sqrt(swipeDx * swipeDx + swipeDy * swipeDy) / (getDPI() / 96) * (25.4 / 1);
-                
-                // Свайп должен быть вниз, достаточно длинный, по горизонтали в пределах
-                if (swipeDyMM > RELOAD_SWIPE_MIN_DISTANCE_MM &&
-                    swipeDxMM < RELOAD_SWIPE_MAX_HORIZONTAL_MM &&
-                    swipeTime < RELOAD_SWIPE_MAX_TIME_MS) {
-                    this.swipe.triggered = true;
-                }
-            }
-        }
+        const touches = Array.from(e.changedTouches);
         
-        // Сообщаем об изменении джойстика
-        if (this.joystick.active && Math.abs(this.joystick.stickX) > 0.01 || Math.abs(this.joystick.stickY) > 0.01) {
-            if (this.onLeftStickChanged) {
-                this.onLeftStickChanged(this.joystick.stickX, this.joystick.stickY);
-            }
-        }
-        
-        // Сообщаем об повороте камеры
-        if (this.action.isCameraMode && this.action.isHolding) {
-            const dx = this.action.currentX - this.action.startX;
-            const dxMM = dx / (getDPI() / 96) * (25.4 / 1);
-            const rotation = dxMM * CAMERA_ROTATION_SENSITIVITY;
+        for (const touch of touches) {
+            const x = touch.clientX;
+            const y = touch.clientY;
             
-            if (this.onCameraRotation) {
-                this.onCameraRotation(rotation);
+            // Если это тач кнопки — игнорируем движение
+            if (touch._buttonType) continue;
+            
+            // Проверяем, принадлежит ли этот тач левому джойстику
+            if (this.leftStick.active && this.leftStick.touchId === touch.identifier) {
+                this.leftStick.currentX = x;
+                this.leftStick.currentY = y;
+                
+                // Вычисляем смещение от базы
+                let dx = x - this.leftStick.baseX;
+                let dy = y - this.leftStick.baseY;
+                
+                // Ограничиваем радиус джойстика
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > this.stickRadius) {
+                    const scale = this.stickRadius / distance;
+                    dx *= scale;
+                    dy *= scale;
+                }
+                
+                // Нормализуем значения к [-1, 1]
+                this.leftStick.normX = dx / this.stickRadius;
+                this.leftStick.normY = dy / this.stickRadius;
+                
+                if (this.debug) {
+                    console.log(`Левый: x=${this.leftStick.normX.toFixed(2)}, y=${this.leftStick.normY.toFixed(2)}`);
+                }
+            }
+            
+            // Проверяем, appartient ли этот тач правому джойстику
+            if (this.rightStick.active && this.rightStick.touchId === touch.identifier) {
+                this.rightStick.currentX = x;
+                this.rightStick.currentY = y;
+                
+                // Вычисляем смещение от базы
+                let dx = x - this.rightStick.baseX;
+                let dy = y - this.rightStick.baseY;
+                
+                // Ограничиваем радиус джойстика
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                if (distance > this.stickRadius) {
+                    const scale = this.stickRadius / distance;
+                    dx *= scale;
+                    dy *= scale;
+                }
+                
+                // Нормализуем значения к [-1, 1]
+                this.rightStick.normX = dx / this.stickRadius;
+                this.rightStick.normY = dy / this.stickRadius;
+                
+                if (this.debug) {
+                    console.log(`Правый: x=${this.rightStick.normX.toFixed(2)}, y=${this.rightStick.normY.toFixed(2)}`);
+                }
             }
         }
     }
     
     /**
-     * Обработка окончания касания
+     * Обработка touchend
      */
     handleTouchEnd(e) {
-        if (!this.isTouchDevice) return;
         e.preventDefault();
         
-        for (const touch of e.changedTouches) {
-            const touchId = touch.identifier;
-            const timeSinceStart = Date.now() - this.action.startTime;
-            
-            // Заканчиваем джойстик
-            if (this.joystick.active && touchId === this.joystick.touchId) {
-                this.joystick.active = false;
-                this.joystick.touchId = null;
-                this.joystick.stickX = 0;
-                this.joystick.stickY = 0;
-                this.visuals.showJoystick = false;
-                
-                if (this.onLeftStickChanged) {
-                    this.onLeftStickChanged(0, 0);
-                }
+        const touches = Array.from(e.changedTouches);
+        
+        for (const touch of touches) {
+            // Если это был тач кнопки
+            if (touch._buttonType === 'shoot') {
+                this.buttons.shoot = false;
+            } else if (touch._buttonType === 'reload') {
+                this.buttons.reload = false;
+            } else if (touch._buttonType === 'run') {
+                this.buttons.run = false;
             }
             
-            // Заканчиваем действие
-            if (this.action.active && touchId === this.action.touchId) {
-                const totalMoveMM = Math.sqrt(
-                    Math.pow(this.action.currentX - this.action.startX, 2) + 
-                    Math.pow(this.action.currentY - this.action.startY, 2)
-                ) / (getDPI() / 96) * (25.4 / 1);
-                
-                // Проверяем: короткое касание = выстрел
-                if (timeSinceStart <= CLICK_MAX_TIME_MS && totalMoveMM <= CLICK_MAX_MOVE_MM && !this.action.shotTriggered) {
-                    this.action.shotTriggered = true;
-                    if (this.onShot) {
-                        this.onShot();
-                    }
-                }
-                // Проверяем: свайп перезарядки
-                else if (this.swipe.triggered) {
-                    if (this.onReload) {
-                        this.onReload();
-                    }
-                }
-                // Длительное удержание без действий - просто сброс
-                else if (this.action.isHolding) {
-                    // Если было удержание но не стреляли и не вращали - просто конец
-                }
-                
-                this.action.active = false;
-                this.action.touchId = null;
-                this.action.isCameraMode = false;
+            // Проверяем, заканчивается ли левый джойстик
+            if (this.leftStick.active && this.leftStick.touchId === touch.identifier) {
+                this.leftStick.active = false;
+                this.leftStick.touchId = null;
+                this.leftStick.normX = 0;
+                this.leftStick.normY = 0;
             }
             
-            // Заканчиваем свайп
-            if (this.swipe.active && touchId === this.swipe.touchId) {
-                this.swipe.active = false;
-                this.swipe.touchId = null;
+            // Проверяем, заканчивается ли правый джойстик
+            if (this.rightStick.active && this.rightStick.touchId === touch.identifier) {
+                this.rightStick.active = false;
+                this.rightStick.touchId = null;
+                this.rightStick.normX = 0;
+                this.rightStick.normY = 0;
             }
         }
     }
     
     /**
-     * Обработка отмены касания
+     * Обработка touchcancel
      */
     handleTouchCancel(e) {
-        if (!this.isTouchDevice) return;
         e.preventDefault();
+        // Сбрасываем всё
+        this.leftStick.active = false;
+        this.leftStick.touchId = null;
+        this.leftStick.normX = 0;
+        this.leftStick.normY = 0;
         
-        for (const touch of e.changedTouches) {
-            const touchId = touch.identifier;
-            
-            if (this.joystick.active && touchId === this.joystick.touchId) {
-                this.joystick.active = false;
-                this.joystick.touchId = null;
-                this.joystick.stickX = 0;
-                this.joystick.stickY = 0;
-                this.visuals.showJoystick = false;
-            }
-            
-            if (this.action.active && touchId === this.action.touchId) {
-                this.action.active = false;
-                this.action.touchId = null;
-            }
-            
-            if (this.swipe.active && touchId === this.swipe.touchId) {
-                this.swipe.active = false;
-                this.swipe.touchId = null;
-            }
-        }
-    }
-    
-    /**
-     * Отрисовка визуальных элементов
-     */
-    render(ctx) {
-        if (!this.isTouchDevice) return;
+        this.rightStick.active = false;
+        this.rightStick.touchId = null;
+        this.rightStick.normX = 0;
+        this.rightStick.normY = 0;
         
-        // Отрисовка джойстика
-        if (this.visuals.showJoystick) {
-            // Зона джойстика (полупрозрачный круг)
-            const baseRadiusPx = mmToPx(JOYSTICK_RADIUS_MM);
-            ctx.beginPath();
-            ctx.arc(this.visuals.joystickCenterX, this.visuals.joystickCenterY, baseRadiusPx, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            
-            // "Палец" джойстика
-            const thumbRadiusPx = mmToPx(JOYSTICK_THUMB_MM / 2);
-            ctx.beginPath();
-            ctx.arc(this.visuals.joystickThumbX, this.visuals.joystickThumbY, thumbRadiusPx, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.fill();
-        }
+        this.buttons.shoot = false;
+        this.buttons.reload = false;
+        this.buttons.run = false;
     }
     
     /**
-     * Цикл отрисовки
-     */
-    startRenderLoop() {
-        const render = () => {
-            // Очистка визуальных элементов джойстика при отсутствии активных касаний
-            if (!this.joystick.active) {
-                this.visuals.showJoystick = false;
-            }
-            requestAnimationFrame(render);
-        };
-        requestAnimationFrame(render);
-    }
-    
-    /**
-     * Получить данные левого стика (для интеграции с игрой)
-     * @returns {{x: number, y: number}} нормализованные значения [-1, 1]
-     */
-    getLeftStickData() {
-        if (!this.isTouchDevice) return { x: 0, y: 0 };
-        return {
-            x: this.joystick.stickX,
-            y: this.joystick.stickY
-        };
-    }
-    
-    /**
-     * Проверка: был лиトリггер выстрела
-     */
-    wasShotTriggered() {
-        return this.action.shotTriggered;
-    }
-    
-    /**
-     * Проверка: был ли свайп перезарядки
-     */
-    wasReloadTriggered() {
-        return this.swipe.triggered;
-    }
-    
-    /**
-     * Получение текущей ротации камеры
-     */
-    getCameraRotation() {
-        if (!this.action.isCameraMode || !this.action.isHolding) return 0;
-        const dx = this.action.currentX - this.action.startX;
-        const dxMM = dx / (getDPI() / 96) * (25.4 / 1);
-        return dxMM * CAMERA_ROTATION_SENSITIVITY;
-    }
-    
-    /**
-     * Проверка: активно ли удержание камеры
-     */
-    isCameraHolding() {
-        return this.action.isCameraMode && this.action.isHolding;
-    }
-    
-    /**
-     * Сброс флагов после обработки кадровых событий
-     */
-    resetFrameFlags() {
-        this.action.shotTriggered = false;
-        this.swipe.triggered = false;
-    }
-    
-    /**
-     * Проверка: является ли устройство тач-устройством
-     */
-    isActive() {
-        return this.isTouchDevice;
-    }
-    
-    /**
-     * Обновление callback-ов
-     */
-    setCallbacks(options) {
-        this.onShot = options.onShot || this.onShot;
-        this.onReload = options.onReload || this.onReload;
-        this.onLeftStickChanged = options.onLeftStickChanged || this.onLeftStickChanged;
-        this.onCameraRotation = options.onCameraRotation || this.onCameraRotation;
-    }
-    
-    /**
-     * Получение нормализованных данных контроллера для интеграции с Game
-     * @returns {Object} данные в формате controllerData
+     * Возвращает данные контроллера в формате, совместимом с gamepad
+     * Используется в Player.update()
      */
     getControllerData() {
-        if (!this.isTouchDevice) {
-            return {
-                connected: false,
-                leftStickX: 0,
-                leftStickY: 0,
-                rightStickX: 0,
-                rightStickY: 0
-            };
-        }
+        const deadZone = 0.1;
+        
+        // Применяем дедзону
+        let leftX = this.leftStick.normX;
+        let leftY = this.leftStick.normY;
+        
+        if (Math.abs(leftX) < deadZone) leftX = 0;
+        else if (leftX > 0) leftX = (leftX - deadZone) / (1 - deadZone);
+        else leftX = (leftX + deadZone) / (1 - deadZone);
+        
+        if (Math.abs(leftY) < deadZone) leftY = 0;
+        else if (leftY > 0) leftY = (leftY - deadZone) / (1 - deadZone);
+        else leftY = (leftY + deadZone) / (1 - deadZone);
         
         return {
-            connected: this.joystick.active,
-            leftStickX: this.joystick.stickX,
-            leftStickY: this.joystick.stickY,
-            rightStickX: this.action.isCameraMode && this.action.isHolding ? 
-                ((this.action.currentX - this.action.startX) / (getDPI() / 96) * (25.4 / 1)) * CAMERA_ROTATION_SENSITIVITY : 0,
-            rightStickY: 0
+            connected: this.isTouchDevice,
+            leftStickX: leftX,
+            leftStickY: leftY,
+            rightStickX: this.rightStick.normX,
+            rightStickY: this.rightStick.normY,
+            runButton: this.buttons.run,
+            triggerButton: this.buttons.shoot,
+            aButton: false,
+            bButton: false
         };
+    }
+    
+    /**
+     * Проверяем, нужно ли выполнить действие (для одноразовых нажатий)
+     */
+    wasButtonJustPressed(currentState, lastState) {
+        return currentState && !lastState;
+    }
+    
+    /**
+     * Отрисовка виртуальных джойстиков и кнопок на канвасе
+     */
+    render(ctx, width, height) {
+        // Отрисовываем только если джойстик активен или устройство тачевое
+        if (!this.isTouchDevice) return;
+        
+        // Левый джойстик (движение)
+        if (this.leftStick.active) {
+            this.drawJoystick(ctx, this.leftStick.baseX, this.leftStick.baseY, 
+                           this.leftStick.normX, this.leftStick.normY);
+        } else {
+            // Рисуем полупрозрачный подсказочный круг слева внизу
+            this.drawJoystickHint(ctx, width * 0.15, height - 120);
+        }
+        
+        // Правый джойстик (камера)
+        if (this.rightStick.active) {
+            this.drawJoystick(ctx, this.rightStick.baseX, this.rightStick.baseY, 
+                           this.rightStick.normX, this.rightStick.normY);
+        } else {
+            // Рисуем полупрозрачный подсказочный круг справа
+            this.drawJoystickHint(ctx, width * 0.85, height - 120);
+        }
+        
+        // Отрисовка кнопок
+        this.drawButton(ctx, this.buttonPositions.shoot, this.buttons.shoot, '🔫', '#ff4444');
+        this.drawButton(ctx, this.buttonPositions.reload, this.buttons.reload, '🔄', '#4488ff');
+        this.drawButton(ctx, this.buttonPositions.run, this.buttons.run, '⚡', '#ffaa00');
+    }
+    
+    /**
+     * Отрисовка джойстика
+     */
+    drawJoystick(ctx, baseX, baseY, normX, normY) {
+        // Основа джойстика
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(baseX, baseY, this.stickVisualRadius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // "Грибок" джойстика
+        const knobX = baseX + normX * this.stickRadius;
+        const knobY = baseY + normY * this.stickRadius;
+        
+        ctx.beginPath();
+        ctx.arc(knobX, knobY, this.knobVisualRadius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+    
+    /**
+     * Отрисовка подсказки где находится джойстик
+     */
+    drawJoystickHint(ctx, x, y) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(x, y, this.stickVisualRadius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+    
+    /**
+     * Отрисовка кнопки
+     */
+    drawButton(ctx, position, isActive, icon, color) {
+        if (!position) return;
+        
+        ctx.save();
+        
+        // Основа кнопки
+        ctx.beginPath();
+        ctx.arc(position.x, position.y, position.radius, 0, Math.PI * 2);
+        
+        if (isActive) {
+            ctx.fillStyle = `${color}88`; // Прозрачность при нажатии
+            ctx.strokeStyle = `${color}cc`;
+        } else {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        }
+        
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Иконка кнопки
+        ctx.font = `${position.radius}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(icon, position.x, position.y + 2);
+        
+        ctx.restore();
+    }
+    
+    /**
+     * Сброс состояния (например, при рестарте игры)
+     */
+    reset() {
+        this.leftStick.active = false;
+        this.leftStick.touchId = null;
+        this.leftStick.normX = 0;
+        this.leftStick.normY = 0;
+        
+        this.rightStick.active = false;
+        this.rightStick.touchId = null;
+        this.rightStick.normX = 0;
+        this.rightStick.normY = 0;
+        
+        this.buttons.shoot = false;
+        this.buttons.reload = false;
+        this.buttons.run = false;
     }
 }
