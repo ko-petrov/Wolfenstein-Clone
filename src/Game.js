@@ -915,9 +915,12 @@ export class Game {
      */
     updateTouchController() {
         const touchData = this.touchController.getControllerData();
-        if (!touchData.connected) return;
+        if (!touchData.connected) {
+            this.touchController.clearShootTrigger();
+            return;
+        }
         
-        // Стрельба (только при нажатии)
+        // Стрельба (только при тапе — triggerButton = true один кадр)
         if (touchData.triggerButton && !this.lastTouchShoot) {
             if (!this.isGameOver) {
                 this.shoot();
@@ -936,6 +939,9 @@ export class Game {
             if (!this.isGameOver) this.reloadWeapon();
         }
         this.lastTouchReload = touchData.bButton;
+        
+        // Сброс триггера выстрела для след. кадра
+        this.touchController.clearShootTrigger();
     }
 
     /**
