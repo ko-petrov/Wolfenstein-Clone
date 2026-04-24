@@ -123,11 +123,6 @@ export class Game {
         
         window.addEventListener('resize', () => self.resizeCanvas());
         
-        // На мобильных используем visualViewport для корректного размера при скрытии адресной строки
-        if (window.visualViewport) {
-            window.visualViewport.addEventListener('resize', () => self.resizeCanvas());
-        }
-        
         window.addEventListener('keydown', (e) => {
             self.keys[e.code] = true;
             
@@ -211,22 +206,10 @@ export class Game {
      * Изменение размера canvas
      */
     resizeCanvas() {
-        // На мобильных используем visualViewport для учета адресной строки
-        const useVisualViewport = window.visualViewport;
-        
-        if (useVisualViewport) {
-            // visualViewport дает реальный размер области просмотра (без адресной строки)
-            this.canvas.width = Math.floor(useVisualViewport.width * window.devicePixelRatio);
-            this.canvas.height = Math.floor(useVisualViewport.height * window.devicePixelRatio);
-            this.width = this.canvas.width;
-            this.height = this.canvas.height;
-        } else {
-            // Fallback для десктопов
-            this.canvas.width = window.innerWidth;
-            this.canvas.height = window.innerHeight;
-            this.width = this.canvas.width;
-            this.height = this.canvas.height;
-        }
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+        this.width = this.canvas.width;
+        this.height = this.canvas.height;
         
         // Обновляем размер рендерера
         if (this.renderer) {

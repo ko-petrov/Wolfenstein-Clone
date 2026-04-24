@@ -2,10 +2,9 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, shrink-to-fit=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="format-detection" content="telephone=no">
     <meta name="mobile-web-app-capable" content="yes">
     <title>Wolfenstein Clone - Raycaster</title>
     <style>
@@ -38,16 +37,12 @@
             image-rendering: crisp-edges;
             touch-action: none;
         }
-         /* Fullscreen на мобильных - canvas на весь экран */
-         /* Размер canvas управляется через JS (visualViewport API) */
+        /* Fullscreen на мобильных - canvas на весь экран */
         body.fullscreen canvas {
             border: none;
-        }
-        body.fullscreen #crosshair {
-            display: none !important;
-        }
-        body.fullscreen #fullscreenBtn {
-            display: none !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            object-fit: cover;
         }
         /* Кнопка полного экрана (только на тач-устройствах) */
         #fullscreenBtn {
@@ -120,134 +115,71 @@
             const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
             const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
             
-            if (isTouchDevice) {
-                const btn = document.getElementById('fullscreenBtn');
-                let fullscreenAttempted = false;
+            if (!isTouchDevice) return;
+            
+            const btn = document.getElementById('fullscreenBtn');
+            const canvas = document.getElementById('gameCanvas');
+            let fullscreenRequested = false;
+            
+            // Показываем кнопку
+            btn.style.display = 'block';
+            
+            // Войти в полноэкранный режим
+            function enterFullscreen() {
+                if (fullscreenRequested) return;
+                fullscreenRequested = true;
                 
-                // Используем visualViewport для правильного размера canvas
-                const useVisualViewport = window.visualViewport;
-                
-                // Перезапускаем resize через window (Game.resizeCanvas сам использует visualViewport)
-                function updateCanvasSize() {
-                    if (document.body.classList.contains('fullscreen')) {
-                        window.dispatchEvent(new Event('resize'));
-                    }
-                }
-                
-                // Вход в полноэкранный режим
-                function enterFullscreen() {
-                    // Для iOS используем webkitRequestFullScreen с режимом FullscreenVideo
-                    if (isIOS) {
-                        // На iOS requestFullscreen не всегда работает, поэтому
-                        // просто скрываем адресную строку через scroll и убираем UI
-                        document.body.classList.add('fullscreen');
-                        // Прокрутка на 1px вниз для скрытия адресной строки в Safari
-                        window.scrollTo(0, 1);
-                        setTimeout(() => window.scrollTo(0, 1), 100);
-                    } else {
-                        // Android и другие устройства
-                        const elem = document.documentElement;
-                        if (elem.requestFullscreen) {
-                            elem.requestFullscreen().then(() => {
-                                document.body.classList.add('fullscreen');
-                            }).catch(() => {
-                                // Fallback если Fullscreen API не сработал
-                                document.body.classList.add('fullscreen');
-                            });
-                        } else if (elem.webkitRequestFullscreen) {
-                            elem.webkitRequestFullscreen();
-                            document.body.classList.add('fullscreen');
-                        } else if (elem.webkitRequestFullScreen) {
-                            elem.webkitRequestFullScreen();
-                            document.body.classList.add('fullscreen');
-                        } else if (elem.msRequestFullscreen) {
-                            elem.msRequestFullscreen();
-                            document.body.classList.add('fullscreen');
-                        } else {
-                            document.body.classList.add('fullscreen');
-                        }
-                    }
-                    
-                    btn.style.display = 'none';
-                    
-                    // Обновляем размер canvas после перехода в полноэкранный режим
-                    setTimeout(updateCanvasSize, 300);
-                }
-                
-                // Выход из полноэкранного режима
-                function exitFullscreen() {
-                    document.body.classList.remove('fullscreen');
-                    
-                    if (document.exitFullscreen) {
-                        document.exitFullscreen().catch(() => {});
-                    } else if (document.webkitExitFullscreen) {
-                        document.webkitExitFullscreen();
-                    } else if (document.webkitCancelFullScreen) {
-                        document.webkitCancelFullScreen();
-                    } else if (document.msExitFullscreen) {
-                        document.msExitFullscreen();
-                    }
-                    
-                    // Обновляем размер canvas после выхода
-                    setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
-                }
-                
-                // Автоматический вход при первом касании
-                function tryAutoFullscreen(e) {
-                    if (!fullscreenAttempted) {
-                        fullscreenAttempted = true;
-                        enterFullscreen();
-                    }
-                }
-                
-                document.addEventListener('touchstart', tryAutoFullscreen, { once: true });
-                
-                // Кнопка полного экрана
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    enterFullscreen();
-                });
-                btn.addEventListener('touchstart', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    enterFullscreen();
-                }, { passive: false });
-                
-                // Слушаем изменения visualViewport
-                if (useVisualViewport) {
-                    useVisualViewport.addEventListener('resize', () => {
-                        if (document.body.classList.contains('fullscreen')) {
-                            updateCanvasSize();
-                        }
+                // Для iOS Safari — используем webkitRequestFullscreen на document.documentElement
+                if (isIOS) {
+                    document.documentElement.webkitRequestFullscreen?.();
+                } else if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {
+                        fullscreenRequested = false;
                     });
                 }
                 
-                // Слушаем изменение размера окна
-                window.addEventListener('resize', () => {
-                    if (document.body.classList.contains('fullscreen')) {
-                        setTimeout(updateCanvasSize, 100);
-                    }
-                });
+                document.body.classList.add('fullscreen');
+                btn.style.display = 'none';
                 
-                // Слушаем выход из полноэкранного режима
-                document.addEventListener('fullscreenchange', () => {
-                    if (!document.fullscreenElement) {
-                        exitFullscreen();
-                    }
-                });
-                
-                document.addEventListener('webkitfullscreenchange', () => {
-                    if (!document.webkitFullscreenElement) {
-                        exitFullscreen();
-                    }
-                });
-                
-                document.addEventListener('webkitfullscreenchange', () => {
-                    if (!document.webkitCurrentFullScreenElement) {
-                        exitFullscreen();
-                    }
-                });
+                // Обновляем размер canvas после перехода
+                setTimeout(() => {
+                    canvas.width = window.innerWidth;
+                    canvas.height = window.innerHeight;
+                    window.dispatchEvent(new Event('resize'));
+                }, 100);
             }
+            
+            // Выйти из полноэкранного режима
+            function exitFullscreenHandler() {
+                fullscreenRequested = false;
+                document.body.classList.remove('fullscreen');
+                btn.style.display = 'block';
+                btn.textContent = '⛶ Полный экран';
+            }
+            
+            // Слушаем изменения полноэкранного режима
+            document.addEventListener('fullscreenchange', () => {
+                if (!document.fullscreenElement) exitFullscreenHandler();
+            });
+            
+            // Кнопка — вход в полноэкранный режим по tap
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                enterFullscreen();
+            }, { passive: false });
+            
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                enterFullscreen();
+            });
+            
+            // При потере fullscreen (кнопка Esc на Android и т.д.)
+            document.addEventListener('webkitfullscreenchange', () => {
+                if (!document.webkitFullscreenElement) exitFullscreenHandler();
+            });
+            
         })();
     </script>
 </body>
