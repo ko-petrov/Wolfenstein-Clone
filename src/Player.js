@@ -11,7 +11,7 @@ export class Player {
         this.runSpeed = 1.0;    // Скорость бега (при удержании Shift)
         this.rotSpeed = 0.013;
         this.mouseSensitivity = 0.002; // Чувствительность мыши для поворота камеры
-        this.touchCameraSensitivity = 0.0002; // Чувствительность мыши для поворота камеры
+        this.touchCameraSensitivity = 0.00002; // Чувствительность мыши для поворота камеры
         this.radius = 15; // Радиус игрока для коллизий
         this.health = 10; // Текущее здоровье
         this.maxHealth = 10; // Максимальное здоровье
