@@ -297,7 +297,8 @@ export class TouchController {
             runButton: this.runButton,
             triggerButton: this.triggerButton,  // Будет true только один кадр при тапе
             aButton: false,
-            bButton: this.bButton
+            bButton: this.bButton,
+            source: 'touch'
         };
     }
     
