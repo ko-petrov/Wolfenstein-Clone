@@ -63,19 +63,19 @@ export class TouchController {
             radius: 32
         };
         
-        // Кнопка огня (появляется на месте левого стика после ходьбы)
-        this.fireButton = {
+        // Тап выстрела вторым пальцем в верхней трети при активном rightArea
+        this.shootTap = {
             active: false,
-            x: 0,
-            y: 0,
-            radius: 45,
-            createdAt: 0,
-            lifetime: 3000
+            touchId: null,
+            startX: 0,
+            startY: 0,
+            movedDistance: 0,
+            cancelled: false
         };
-        
+
         // Mapping touchId -> action для корректного отслеживания между событиями
         this.touchActions = new Map();
-        
+
         // Флаг тач-устройства
         this.isConnected = false;
         
@@ -117,25 +117,6 @@ export class TouchController {
         return dx * dx + dy * dy <= this.reloadButton.radius * this.reloadButton.radius;
     }
     
-    /**
-     * Проверка попадания в кнопку огня
-     */
-    isInsideFireButton(x, y) {
-        if (!this.fireButton.active) return false;
-        const dx = x - this.fireButton.x;
-        const dy = y - this.fireButton.y;
-        return dx * dx + dy * dy <= this.fireButton.radius * this.fireButton.radius;
-    }
-    
-    /**
-     * Проверка истечения времени кнопки огня (вызывается каждый кадр из Game)
-     */
-    updateFireButton() {
-        if (this.fireButton.active && (Date.now() - this.fireButton.createdAt > this.fireButton.lifetime)) {
-            this.fireButton.active = false;
-        }
-    }
-    
     /* ===================== TOUCH HANDLERS ===================== */
     
     handleTouchStart(e) {
@@ -158,17 +139,8 @@ export class TouchController {
                 continue;
             }
             
-            // 2. Проверяем кнопку огня на левой половине
-            if (this.isInsideFireButton(x, y) && !this.leftStick.active) {
-                this.triggerShoot = true;
-                this.triggerButton = true;
-                this.fireButton.active = false;
-            }
-            
-            // 3. Левая половина — джойстик движения
+            // 2. Левая половина — джойстик движения
             if (x < halfX && !this.leftStick.active) {
-                // Начали движение не на кнопке огня — удаляем кнопку
-                this.fireButton.active = false;
                 this.leftStick.active = true;
                 this.leftStick.touchId = id;
                 this.leftStick.baseX = x;
@@ -185,9 +157,8 @@ export class TouchController {
                 continue;
             }
             
-            // 4. Правая половина — тап или камера (ведение пальцем)
+            // 3. Правая половина — тап или камера (ведение пальцем)
             if (x >= halfX && !this.rightArea.active) {
-                this.fireButton.active = false;
                 this.rightArea.active = true;
                 this.rightArea.touchId = id;
                 this.rightArea.prevX = x;
@@ -204,7 +175,21 @@ export class TouchController {
                 continue;
             }
             
-            // 4. Если левый стик уже активен — игнорируем дополнительные тачи слева
+            // 4. Второй палец — тап выстрела в верхней трети при активном rightArea
+            if (this.rightArea.active && !this.shootTap.active && x >= halfX
+                    && y < (window.innerHeight / 3)
+                    && !this.isInsideReloadButton(x, y)) {
+                this.shootTap.active = true;
+                this.shootTap.touchId = id;
+                this.shootTap.startX = x;
+                this.shootTap.startY = y;
+                this.shootTap.movedDistance = 0;
+                this.shootTap.cancelled = false;
+                this.touchActions.set(id, 'shootTap');
+                continue;
+            }
+
+            // Если левый стик уже активен — игнорируем дополнительные тачи слева
             // (иначе включится второй джойстик)
         }
     }
@@ -256,18 +241,28 @@ export class TouchController {
             if (this.rightArea.active && this.rightArea.touchId === id) {
                 // Вычисляем дельту от предыдущей позиции
                 this.rightArea.delta = x - this.rightArea.prevX;
-                
+
                 // Обновляем текущее и предыдущее положение
                 this.rightArea.prevX = x;
                 this.rightArea.prevY = y;
                 this.rightArea.currentX = x;
                 this.rightArea.currentY = y;
-                
+
                 // Вычисляем расстояние от начальной точки касания
                 const dx = x - this.rightArea.touchStartX;
                 const dy = y - this.rightArea.touchStartY;
                 const currentMovedDist = Math.sqrt(dx * dx + dy * dy);
                 this.rightArea.movedDistance = Math.max(this.rightArea.movedDistance, currentMovedDist);
+            }
+
+            // Тап выстрела вторым пальцем — отменяем если палец ушел далеко
+            if (this.shootTap.active && this.shootTap.touchId === id && !this.shootTap.cancelled) {
+                const dx = x - this.shootTap.startX;
+                const dy = y - this.shootTap.startY;
+                this.shootTap.movedDistance = Math.max(this.shootTap.movedDistance, Math.sqrt(dx * dx + dy * dy));
+                if (this.shootTap.movedDistance > this.tapThreshold) {
+                    this.shootTap.cancelled = true;
+                }
             }
         }
     }
@@ -291,12 +286,6 @@ export class TouchController {
                 if (this.leftStick.movedDistance < this.tapThreshold) {
                     this.triggerShoot = true;
                     this.triggerButton = true;
-                } else {
-                    // Это была реальная ходьба — спавним кнопку огня в точке где палец отпущен
-                    this.fireButton.active = true;
-                    this.fireButton.x = this.leftStick.currentX;
-                    this.fireButton.y = this.leftStick.currentY;
-                    this.fireButton.createdAt = Date.now();
                 }
 
                 this.leftStick.active = false;
@@ -308,6 +297,18 @@ export class TouchController {
                 this.runButton = false;
             }
             
+            // Тап выстрела вторым пальцем
+            if (action === 'shootTap' && this.shootTap.active) {
+                if (!this.shootTap.cancelled) {
+                    this.triggerShoot = true;
+                    this.triggerButton = true;
+                }
+                this.shootTap.active = false;
+                this.shootTap.touchId = null;
+                this.shootTap.movedDistance = 0;
+                this.shootTap.cancelled = false;
+            }
+
             // Правая область
             if (action === 'rightArea' || (this.rightArea.active && this.rightArea.touchId === id)) {
                 // Если палец практически не двигался — это ТАП = ВЫСТРЕЛ
@@ -315,13 +316,13 @@ export class TouchController {
                     this.triggerShoot = true;
                     this.triggerButton = true;
                 }
-                
+
                 this.rightArea.active = false;
                 this.rightArea.touchId = null;
                 this.rightArea.delta = 0;
                 this.rightArea.movedDistance = 0;
             }
-            
+
             // Удаляем действие из карты
             this.touchActions.delete(id);
         }
@@ -390,11 +391,6 @@ export class TouchController {
         
         // Кнопка перезарядки
         this.drawReloadButton(ctx);
-        
-        // Кнопка огня
-        if (this.fireButton.active) {
-            this.drawFireButton(ctx);
-        }
     }
     
     drawJoystick(ctx, baseX, baseY, normX, normY, isRun) {
@@ -456,41 +452,6 @@ export class TouchController {
         ctx.restore();
     }
     
-    drawFireButton(ctx) {
-        const btn = this.fireButton;
-        const elapsed = Date.now() - btn.createdAt;
-        const remaining = 1 - (elapsed / btn.lifetime);
-        const alpha = remaining;
-        
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        
-        // Outer ring
-        ctx.beginPath();
-        ctx.arc(btn.x, btn.y, btn.radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 80, 50, 0.3)';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(255, 100, 50, 0.8)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        
-        // Timer ring (shrinking arc)
-        ctx.beginPath();
-        ctx.arc(btn.x, btn.y, btn.radius + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remaining);
-        ctx.strokeStyle = 'rgba(255, 120, 50, 0.9)';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        
-        // Icon (bullet dot)
-        ctx.fillStyle = 'rgba(255, 200, 100, 0.9)';
-        ctx.font = 'bold 24px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('\u25CF', btn.x, btn.y + 1);
-        
-        ctx.restore();
-    }
-    
     drawReloadButton(ctx) {
         const btn = this.reloadButton;
         const isActive = this.bButton;
@@ -536,14 +497,17 @@ export class TouchController {
         this.rightArea.touchId = null;
         this.rightArea.delta = 0;
         this.rightArea.movedDistance = 0;
-        
+
+        this.shootTap.active = false;
+        this.shootTap.touchId = null;
+        this.shootTap.movedDistance = 0;
+        this.shootTap.cancelled = false;
+
         this.triggerShoot = false;
         this.triggerButton = false;
         this.runButton = false;
         this.bButton = false;
         this.reloadButtonHeld = false;
-        
-        this.fireButton.active = false;
         
         this.touchActions.clear();
     }
