@@ -18,7 +18,10 @@ export class TouchController {
             currentY: 0,
             normX: 0,
             normY: 0,
-            rawDistance: 0  // Сырое расстояние от центра для определения бега
+            rawDistance: 0,      // Сырое расстояние от центра для определения бега
+            touchStartX: 0,      // Начальная X для порога тапа
+            touchStartY: 0,      // Начальная Y для порога тапа
+            movedDistance: 0     // Насколько палец сдвинулся от точки касания
         };
         
         // Правая область (камера + выстрел)
@@ -137,6 +140,9 @@ export class TouchController {
                 this.leftStick.normX = 0;
                 this.leftStick.normY = 0;
                 this.leftStick.rawDistance = 0;
+                this.leftStick.touchStartX = x;
+                this.leftStick.touchStartY = y;
+                this.leftStick.movedDistance = 0;
                 this.touchActions.set(id, 'leftStick');
                 continue;
             }
@@ -199,6 +205,12 @@ export class TouchController {
                 this.leftStick.currentY = y;
                 this.leftStick.normX = dx / this.stickMaxRadius;
                 this.leftStick.normY = dy / this.stickMaxRadius;
+
+                // Отслеживаем расстояние от начальной точки для определения тапа
+                const ddx = x - this.leftStick.touchStartX;
+                const ddy = y - this.leftStick.touchStartY;
+                const currentMovedDist = Math.sqrt(ddx * ddx + ddy * ddy);
+                this.leftStick.movedDistance = Math.max(this.leftStick.movedDistance, currentMovedDist);
             }
             
             // Правая область — камера (ведение пальцем: дельта перемещения)
@@ -236,11 +248,18 @@ export class TouchController {
             
             // Левый стик
             if (action === 'leftStick' || (this.leftStick.active && this.leftStick.touchId === id)) {
+                // Если палец практически не двигался — это ТАП = ВЫСТРЕЛ
+                if (this.leftStick.movedDistance < this.tapThreshold) {
+                    this.triggerShoot = true;
+                    this.triggerButton = true;
+                }
+
                 this.leftStick.active = false;
                 this.leftStick.touchId = null;
                 this.leftStick.normX = 0;
                 this.leftStick.normY = 0;
                 this.leftStick.rawDistance = 0;
+                this.leftStick.movedDistance = 0;
                 this.runButton = false;
             }
             
