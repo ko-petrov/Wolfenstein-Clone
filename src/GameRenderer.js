@@ -1392,20 +1392,19 @@ export class GameRenderer {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
         ctx.fillRect(0, 0, width, height);
         
-        // Центральный текст
+        ctx.textAlign = 'center';
+        
         if (isVictory) {
             if (currentLevel >= 10) {
-                // Полный финал игры
                 ctx.fillStyle = '#FFD700';
                 ctx.font = 'bold 48px Arial';
-                ctx.fillText('🏆 ПОЛНАЯ ПОБЕДА! 🏆', width / 2, height / 2 - 100);
+                ctx.fillText('ПОЛНАЯ ПОБЕДА!', width / 2, height / 2 - 100);
                 
                 ctx.fillStyle = '#FFFFFF';
                 ctx.font = '28px Arial';
                 ctx.fillText('Вы прошли все 10 уровней!', width / 2, height / 2 - 50);
                 ctx.fillText('Игра пройдена!', width / 2, height / 2 - 10);
             } else {
-                // Уровень пройден
                 ctx.fillStyle = '#00FF00';
                 ctx.font = 'bold 48px Arial';
                 ctx.fillText(`VICTORY!`, width / 2, height / 2 - 100);
@@ -1417,13 +1416,8 @@ export class GameRenderer {
                 ctx.font = '24px Arial';
                 ctx.fillText(`Собранные монеты: ${coinsCollected}`, width / 2, height / 2);
                 ctx.fillText(`Убито врагов: ${enemiesKilled}`, width / 2, height / 2 + 30);
-                
-                ctx.fillStyle = '#FFFF00';
-                ctx.font = '20px Arial';
-                ctx.fillText('Нажмите ENTER или кликните для перехода на следующий уровень', width / 2, height / 2 + 70);
             }
         } else {
-            // Game Over
             ctx.fillStyle = '#FF0000';
             ctx.font = 'bold 48px Arial';
             ctx.fillText('GAME OVER', width / 2, height / 2 - 80);
@@ -1433,10 +1427,6 @@ export class GameRenderer {
             ctx.fillText(`Уровень: ${currentLevel}`, width / 2, height / 2 - 30);
             ctx.fillText(`Собранные монеты: ${coinsCollected}`, width / 2, height / 2 + 10);
             ctx.fillText(`Убито врагов: ${enemiesKilled}`, width / 2, height / 2 + 40);
-            
-            ctx.fillStyle = '#FFAA00';
-            ctx.font = '20px Arial';
-            ctx.fillText('Нажмите ENTER или кликните для начала заново', width / 2, height / 2 + 80);
         }
         
         ctx.textAlign = 'left';
