@@ -474,10 +474,7 @@ export class TouchController {
         this.rightArea.delta = 0;
         this.rightArea.movedDistance = 0;
 
-        this.shootTap.active = false;
-        this.shootTap.touchId = null;
-        this.shootTap.movedDistance = 0;
-        this.shootTap.cancelled = false;
+        this.shootTapPending = false;
 
         this.triggerShoot = false;
         this.triggerButton = false;
