@@ -80,16 +80,17 @@ export class TouchController {
         }
         
         window.addEventListener('resize', () => this.updateReloadButton());
+        window.addEventListener('orientationchange', () => this.updateReloadButton());
         this.updateReloadButton();
     }
-    
+
     /**
      * Позиция кнопки перезарядки (правыйверхний угол)
      */
     updateReloadButton() {
-        const w = this.canvas.width;
-        const h = this.canvas.height;
-        
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
         this.reloadButton.x = w - 60;
         this.reloadButton.y = 80;
     }
@@ -323,26 +324,8 @@ export class TouchController {
             this.drawStickHint(ctx, width * 0.15, height - 130, 'WASD');
         }
         
-        // Правая область (камера) — рисуем индикатор при активном движении
-        if (this.rightArea.active && this.rightArea.movedDistance >= this.tapThreshold) {
-            this.drawStickHint(ctx, width * 0.85, height - 130, 'CAMERA');
-        } else if (!this.rightArea.active) {
-            this.drawStickHint(ctx, width * 0.85, height - 130, 'CAMERA');
-        }
-        
         // Кнопка перезарядки
         this.drawReloadButton(ctx);
-        
-        // Подсказка "тап = огонь" справа (только когда не активна правая область)
-        if (!this.rightArea.active) {
-            ctx.save();
-            ctx.globalAlpha = 0.2;
-            ctx.fillStyle = '#fff';
-            ctx.font = '14px Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('TAP = FIRE', width * 0.75, height - 50);
-            ctx.restore();
-        }
     }
     
     drawJoystick(ctx, baseX, baseY, normX, normY, isRun) {
@@ -399,7 +382,7 @@ export class TouchController {
         ctx.font = '11px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(label, x, y);
+        // ctx.fillText(label, x, y);
         
         ctx.restore();
     }

@@ -325,7 +325,9 @@ export class GameRenderer {
     }
     
     renderMinimap(ctx, width, height, player, map, loot, coins, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT) {
-        const minimapSize = width > height ? height / 4 : width / 4;
+        const aspectRatio = width > height ? width / height : height / width;
+        const divisor = aspectRatio >= 2 ? 3 : 4;
+        const minimapSize = width > height ? height / divisor : width / divisor;
         const margin = 20;
         const mapScale = minimapSize / Math.max(MAP_WIDTH, MAP_HEIGHT);
         const miniSize = TILE_SIZE * mapScale;
