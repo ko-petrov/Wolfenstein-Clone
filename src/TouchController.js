@@ -63,6 +63,16 @@ export class TouchController {
             radius: 32
         };
         
+        // Кнопка огня (появляется на месте левого стика после ходьбы)
+        this.fireButton = {
+            active: false,
+            x: 0,
+            y: 0,
+            radius: 30,
+            createdAt: 0,
+            lifetime: 3000
+        };
+        
         // Mapping touchId -> action для корректного отслеживания между событиями
         this.touchActions = new Map();
         
@@ -107,6 +117,25 @@ export class TouchController {
         return dx * dx + dy * dy <= this.reloadButton.radius * this.reloadButton.radius;
     }
     
+    /**
+     * Проверка попадания в кнопку огня
+     */
+    isInsideFireButton(x, y) {
+        if (!this.fireButton.active) return false;
+        const dx = x - this.fireButton.x;
+        const dy = y - this.fireButton.y;
+        return dx * dx + dy * dy <= this.fireButton.radius * this.fireButton.radius;
+    }
+    
+    /**
+     * Проверка истечения времени кнопки огня (вызывается каждый кадр из Game)
+     */
+    updateFireButton() {
+        if (this.fireButton.active && (Date.now() - this.fireButton.createdAt > this.fireButton.lifetime)) {
+            this.fireButton.active = false;
+        }
+    }
+    
     /* ===================== TOUCH HANDLERS ===================== */
     
     handleTouchStart(e) {
@@ -129,7 +158,14 @@ export class TouchController {
                 continue;
             }
             
-            // 2. Левая половина — джойстик движения
+            // 2. Проверяем кнопку огня на левой половине
+            if (this.isInsideFireButton(x, y) && !this.leftStick.active) {
+                this.triggerShoot = true;
+                this.triggerButton = true;
+                this.fireButton.active = false;
+            }
+            
+            // 3. Левая половина — джойстик движения
             if (x < halfX && !this.leftStick.active) {
                 this.leftStick.active = true;
                 this.leftStick.touchId = id;
@@ -147,7 +183,7 @@ export class TouchController {
                 continue;
             }
             
-            // 3. Правая половина — тап или камера (ведение пальцем)
+            // 4. Правая половина — тап или камера (ведение пальцем)
             if (x >= halfX && !this.rightArea.active) {
                 this.rightArea.active = true;
                 this.rightArea.touchId = id;
@@ -252,6 +288,12 @@ export class TouchController {
                 if (this.leftStick.movedDistance < this.tapThreshold) {
                     this.triggerShoot = true;
                     this.triggerButton = true;
+                } else {
+                    // Это была реальная ходьба — спавним кнопку огня в месте джойстика
+                    this.fireButton.active = true;
+                    this.fireButton.x = this.leftStick.baseX;
+                    this.fireButton.y = this.leftStick.baseY;
+                    this.fireButton.createdAt = Date.now();
                 }
 
                 this.leftStick.active = false;
@@ -345,6 +387,11 @@ export class TouchController {
         
         // Кнопка перезарядки
         this.drawReloadButton(ctx);
+        
+        // Кнопка огня
+        if (this.fireButton.active) {
+            this.drawFireButton(ctx);
+        }
     }
     
     drawJoystick(ctx, baseX, baseY, normX, normY, isRun) {
@@ -406,6 +453,41 @@ export class TouchController {
         ctx.restore();
     }
     
+    drawFireButton(ctx) {
+        const btn = this.fireButton;
+        const elapsed = Date.now() - btn.createdAt;
+        const remaining = 1 - (elapsed / btn.lifetime);
+        const alpha = remaining;
+        
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        
+        // Outer ring
+        ctx.beginPath();
+        ctx.arc(btn.x, btn.y, btn.radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 80, 50, 0.3)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 100, 50, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Timer ring (shrinking arc)
+        ctx.beginPath();
+        ctx.arc(btn.x, btn.y, btn.radius + 4, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * remaining);
+        ctx.strokeStyle = 'rgba(255, 120, 50, 0.9)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // Icon (bullet dot)
+        ctx.fillStyle = 'rgba(255, 200, 100, 0.9)';
+        ctx.font = 'bold 24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('\u25CF', btn.x, btn.y + 1);
+        
+        ctx.restore();
+    }
+    
     drawReloadButton(ctx) {
         const btn = this.reloadButton;
         const isActive = this.bButton;
@@ -457,6 +539,8 @@ export class TouchController {
         this.runButton = false;
         this.bButton = false;
         this.reloadButtonHeld = false;
+        
+        this.fireButton.active = false;
         
         this.touchActions.clear();
     }

@@ -955,6 +955,8 @@ export class Game {
         
         if (this.isGameOver) return;
         
+        this.touchController.updateFireButton();
+        
         const touchData = this.touchController.getControllerData();
         const effectiveController = touchData.connected ? touchData : this.controllerData;
         
