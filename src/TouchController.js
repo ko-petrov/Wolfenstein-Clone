@@ -289,10 +289,10 @@ export class TouchController {
                     this.triggerShoot = true;
                     this.triggerButton = true;
                 } else {
-                    // Это была реальная ходьба — спавним кнопку огня в месте джойстика
+                    // Это была реальная ходьба — спавним кнопку огня в точке где палец отпущен
                     this.fireButton.active = true;
-                    this.fireButton.x = this.leftStick.baseX;
-                    this.fireButton.y = this.leftStick.baseY;
+                    this.fireButton.x = this.leftStick.currentX;
+                    this.fireButton.y = this.leftStick.currentY;
                     this.fireButton.createdAt = Date.now();
                 }
 
