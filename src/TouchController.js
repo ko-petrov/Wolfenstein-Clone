@@ -68,7 +68,7 @@ export class TouchController {
             active: false,
             x: 0,
             y: 0,
-            radius: 30,
+            radius: 45,
             createdAt: 0,
             lifetime: 3000
         };
@@ -167,6 +167,8 @@ export class TouchController {
             
             // 3. Левая половина — джойстик движения
             if (x < halfX && !this.leftStick.active) {
+                // Начали движение не на кнопке огня — удаляем кнопку
+                this.fireButton.active = false;
                 this.leftStick.active = true;
                 this.leftStick.touchId = id;
                 this.leftStick.baseX = x;
@@ -185,6 +187,7 @@ export class TouchController {
             
             // 4. Правая половина — тап или камера (ведение пальцем)
             if (x >= halfX && !this.rightArea.active) {
+                this.fireButton.active = false;
                 this.rightArea.active = true;
                 this.rightArea.touchId = id;
                 this.rightArea.prevX = x;
