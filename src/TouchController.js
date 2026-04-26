@@ -63,15 +63,8 @@ export class TouchController {
             radius: 32
         };
         
-        // Тап выстрела вторым пальцем в верхней трети при активном rightArea
-        this.shootTap = {
-            active: false,
-            touchId: null,
-            startX: 0,
-            startY: 0,
-            movedDistance: 0,
-            cancelled: false
-        };
+        // Флаг выстрела вторым пальцем в верхней трети при активном rightArea
+        this.shootTapPending = false;
 
         // Mapping touchId -> action для корректного отслеживания между событиями
         this.touchActions = new Map();
@@ -175,16 +168,14 @@ export class TouchController {
                 continue;
             }
             
-            // 4. Второй палец — тап выстрела в верхней трети при активном rightArea
-            if (this.rightArea.active && !this.shootTap.active && x >= halfX
+            // 4. Второй палец — выстрел при касании верхней трети (правая половина)
+            if (this.rightArea.active && x >= halfX
                     && y < (window.innerHeight / 3)
                     && !this.isInsideReloadButton(x, y)) {
-                this.shootTap.active = true;
-                this.shootTap.touchId = id;
-                this.shootTap.startX = x;
-                this.shootTap.startY = y;
-                this.shootTap.movedDistance = 0;
-                this.shootTap.cancelled = false;
+                // Стреляем сразу при касании
+                this.shootTapPending = true;
+                this.triggerShoot = true;
+                this.triggerButton = true;
                 this.touchActions.set(id, 'shootTap');
                 continue;
             }
@@ -255,15 +246,7 @@ export class TouchController {
                 this.rightArea.movedDistance = Math.max(this.rightArea.movedDistance, currentMovedDist);
             }
 
-            // Тап выстрела вторым пальцем — отменяем если палец ушел далеко
-            if (this.shootTap.active && this.shootTap.touchId === id && !this.shootTap.cancelled) {
-                const dx = x - this.shootTap.startX;
-                const dy = y - this.shootTap.startY;
-                this.shootTap.movedDistance = Math.max(this.shootTap.movedDistance, Math.sqrt(dx * dx + dy * dy));
-                if (this.shootTap.movedDistance > this.tapThreshold) {
-                    this.shootTap.cancelled = true;
-                }
-            }
+
         }
     }
     
@@ -297,16 +280,9 @@ export class TouchController {
                 this.runButton = false;
             }
             
-            // Тап выстрела вторым пальцем
-            if (action === 'shootTap' && this.shootTap.active) {
-                if (!this.shootTap.cancelled) {
-                    this.triggerShoot = true;
-                    this.triggerButton = true;
-                }
-                this.shootTap.active = false;
-                this.shootTap.touchId = null;
-                this.shootTap.movedDistance = 0;
-                this.shootTap.cancelled = false;
+            // Проставляем выстрел на frame-end, сбрасываем флаг
+            if (action === 'shootTap') {
+                this.shootTapPending = false;
             }
 
             // Правая область
