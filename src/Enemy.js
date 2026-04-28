@@ -1,8 +1,11 @@
 /**
  * Класс для управления врагами с ИИ
  */
+let _nextId = 0;
+
 export class Enemy {
     constructor(x, y, enemyType = 'normal') {
+        this.id = _nextId++;
         this.x = x;
         this.y = y;
         this.radius = 25;
@@ -70,7 +73,7 @@ export class Enemy {
     updateAI(deltaTime, gameRef) {
         if (this.isDead) return;
         
-        // Обновление таймера состояния (для отступа)
+        // Обновление таймера состояния (для отступления)
         if (this.state === 'retreating') {
             this.stateTimer -= deltaTime;
             if (this.stateTimer <= 0) {
@@ -93,17 +96,24 @@ export class Enemy {
             );
             
             if (distToSound <= this.hearingRange) {
+                // Вычисляем уникальный offset для каждого врага,
+                // чтобы они не все сбегались в одну точку
+                const offsetAngle = (this.id % 10) * 0.6 + Math.random() * 0.3;
+                const offsetDist = 40 + Math.random() * 40;
+                const offsetX = Math.cos(offsetAngle) * offsetDist;
+                const offsetY = Math.sin(offsetAngle) * offsetDist;
+                
                 // Враг услышал выстрел
                 if (this.enemyType === 'assault') {
-                    // Штурмовики бегут к игроку (источнику звука)
-                    this.destinationX = gameRef.player.x;
-                    this.destinationY = gameRef.player.y;
+                    // Штурмовики бегут к игроку с небольшим разбросом
+                    this.destinationX = gameRef.player.x + offsetX;
+                    this.destinationY = gameRef.player.y + offsetY;
                     this.state = 'moving';
                     this.reachedDestination = false;
                 } else if (this.enemyType === 'normal') {
-                    // Обычные идут к источнику звука проверять
-                    this.destinationX = gameRef.soundTrigger.x;
-                    this.destinationY = gameRef.soundTrigger.y;
+                    // Обычные идут к источнику звука с разбросом
+                    this.destinationX = gameRef.soundTrigger.x + offsetX;
+                    this.destinationY = gameRef.soundTrigger.y + offsetY;
                     this.state = 'moving';
                     this.reachedDestination = false;
                 } else if (this.enemyType === 'coward') {
@@ -124,9 +134,12 @@ export class Enemy {
         const dist = Math.sqrt(dx * dx + dy * dy);
         
         if (dist > 0) {
-            // Находим точку в противоположном направлении
-            this.destinationX = this.x + (dx / dist) * 150;
-            this.destinationY = this.y + (dy / dist) * 150;
+            // Добавляем случайный угол для разброса направления побега
+            const fleeAngle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 1.0;
+            const fleeDist = 100 + Math.random() * 100;
+            
+            this.destinationX = this.x + Math.cos(fleeAngle) * fleeDist;
+            this.destinationY = this.y + Math.sin(fleeAngle) * fleeDist;
             this.state = 'retreating';
             this.stateTimer = 200;
             this.reachedDestination = false;
@@ -184,15 +197,41 @@ export class Enemy {
         const moveSpeed = this.speed * (deltaTime / 1000);
         
         // Проверяем коллизию со стенами с учётом радиуса врага
-        const newX = this.x + (dx / dist) * moveSpeed;
-        const newY = this.y + (dy / dist) * moveSpeed;
+        let newX = this.x + (dx / dist) * moveSpeed;
+        let newY = this.y + (dy / dist) * moveSpeed;
         
         if (this.isPositionClear(newX, newY, gameRef.MAP)) {
             this.x = newX;
             this.y = newY;
         } else {
-            // Если прямо в стену — пробую скользнуть вдоль walls
+            // Если прямо в стену — пробую скользящее движение вдоль стен
             this.trySlidingMove(deltaTime, gameRef, dx, dy);
+        }
+        
+        // Отталкивание от других врагов
+        this.separateFromOthers(gameRef);
+    }
+    
+    /**
+     * Отталкивание от близких врагов (boid separation)
+     */
+    separateFromOthers(gameRef) {
+        const minDist = this.radius * 2.5; // минимальное расстояние между врагами
+        const separationStrength = 0.5;
+        
+        for (const other of gameRef.enemies) {
+            if (other === this || other.isDead) continue;
+            
+            const edx = this.x - other.x;
+            const edy = this.y - other.y;
+            const dist = Math.sqrt(edx * edx + edy * edy);
+            
+            if (dist < minDist && dist > 0) {
+                // Сила отталкивания зависит от того насколько близко враг
+                const force = (minDist - dist) / minDist * separationStrength;
+                this.x += (edx / dist) * force;
+                this.y += (edy / dist) * force;
+            }
         }
     }
     

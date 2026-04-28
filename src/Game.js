@@ -349,7 +349,7 @@ export class Game {
     /**
      * Поиск случайной позиции в комнате
      */
-    findRandomPositionInRoom(room) {
+    findRandomPositionInRoom(room, minDistToEnemy = TILE_SIZE * 2) {
         for (let attempt = 0; attempt < 50; attempt++) {
             const x = (room.x + room.width / 2 + (Math.random() - 0.5) * room.width * 0.6) * TILE_SIZE;
             const y = (room.y + room.height / 2 + (Math.random() - 0.5) * room.height * 0.6) * TILE_SIZE;
@@ -358,6 +358,19 @@ export class Game {
             const gridY = Math.floor(y / TILE_SIZE);
             
             if (gridX >= 0 && gridX < MAP_WIDTH && gridY >= 0 && gridY < MAP_HEIGHT && this.MAP[gridY][gridX] === 0) {
+                // Проверяем дистанцию до уже существующих врагов
+                let tooCloseToEnemy = false;
+                for (const enemy of this.enemies) {
+                    const edx = x - enemy.x;
+                    const edy = y - enemy.y;
+                    const distToEnemy = Math.sqrt(edx * edx + edy * edy);
+                    if (distToEnemy < minDistToEnemy) {
+                        tooCloseToEnemy = true;
+                        break;
+                    }
+                }
+                if (tooCloseToEnemy) continue;
+                
                 const dx = x - this.player.x;
                 const dy = y - this.player.y;
                 const distToPlayer = Math.sqrt(dx * dx + dy * dy);

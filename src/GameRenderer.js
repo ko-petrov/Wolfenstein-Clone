@@ -226,12 +226,14 @@ export class GameRenderer {
         const numRays = width;
         const rayStep = player.fov / numRays;
         const zBuffer = new Array(numRays).fill(0);
-        
-        const maxShake = Math.abs(cameraBobX);
-        
-        for (let i = -maxShake; i < numRays + maxShake; i++) {
-            const rayAngle = (player.angle - player.fov / 2) + (i * rayStep);
-            
+
+        // По одному лучу на каждый пиксель экрана — без пропусков (нет gap-артефактов)
+        // Индекс луча смещён на cameraBobX: rayIndex = screenX - cameraBobX
+        // Направление и величина совпадают со спрайтами, которые тоже делают +cameraBobX
+        for (let screenX = 0; screenX < numRays; screenX++) {
+            const rayIndex = screenX - cameraBobX;
+            const rayAngle = (player.angle - player.fov / 2) + (rayIndex * rayStep);
+
             let rayDirX = Math.cos(rayAngle);
             let rayDirY = Math.sin(rayAngle);
 
@@ -289,38 +291,33 @@ export class GameRenderer {
                 perpWallDist = (sideDistY - deltaDistY);
             }
 
-            const screenX = Math.floor(i + cameraBobX);
-            if (screenX >= 0 && screenX < numRays) {
-                zBuffer[screenX] = perpWallDist;
-            }
+            zBuffer[screenX] = perpWallDist;
 
             const lineHeight = height / perpWallDist;
-            
+
             const minDistance = 0.3;
             const maxDistance = 5;
             let fogFactor = (perpWallDist - minDistance) / (maxDistance - minDistance);
             fogFactor = Math.max(0, Math.min(1, fogFactor));
-            
+
             const colorX = { r: 245, g: 245, b: 220 };
             const colorY = { r: 225, g: 225, b: 200 };
-          
+
             const baseColor = side === 0 ? colorX : colorY;
             const fogColor = { r: 68, g: 68, b: 68 };
-      
+
             const r = Math.floor(baseColor.r * (1 - fogFactor) + fogColor.r * fogFactor);
             const g = Math.floor(baseColor.g * (1 - fogFactor) + fogColor.g * fogFactor);
             const b = Math.floor(baseColor.b * (1 - fogFactor) + fogColor.b * fogFactor);
-        
+
             ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-            
-            if (screenX >= 0 && screenX < width) {
-                ctx.beginPath();
-                ctx.moveTo(screenX, horizonY - lineHeight / 2);
-                ctx.lineTo(screenX, horizonY + lineHeight / 2);
-                ctx.stroke();
-            }
+
+            ctx.beginPath();
+            ctx.moveTo(screenX, horizonY - lineHeight / 2);
+            ctx.lineTo(screenX, horizonY + lineHeight / 2);
+            ctx.stroke();
         }
-        
+
         return zBuffer;
     }
     
