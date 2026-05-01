@@ -836,80 +836,131 @@ export class Game {
     updateControllerData() {
         const gamepads = navigator.getGamepads ? navigator.getGamepads() : null;
         if (!gamepads) return;
-        
-        // Ищем первый подключенный геймпад (обычно XInput контроллер)
-        const gamepad = gamepads[0];
-        
+
+        // Пробуем все доступные геймпады — на Android контроллер может быть не на индексе 0
+        let gamepad = null;
+        for (let i = 0; i < gamepads.length; i++) {
+            if (gamepads[i]) {
+                gamepad = gamepads[i];
+                break;
+            }
+        }
+
         if (gamepad) {
             if (!this.controllerData.connected && !this.controllerConnectedMessageShown) {
                 console.log(`🎮 Контроллер подключен: ${gamepad.id}`);
+                console.log(`🎮 Осей: ${gamepad.axes.length}, Кнопок: ${gamepad.buttons.length}`);
                 this.controllerConnectedMessageShown = true;
             }
-            
+
             this.controllerData.connected = true;
-            
-            // Левый стик: axes[0] = X (влево-вправо), axes[1] = Y (вверх-вниз)
-            this.controllerData.leftStickX = gamepad.axes[0] || 0;  // -1 (лево) .. 1 (право)
-            this.controllerData.leftStickY = gamepad.axes[1] || 0;  // -1 (вверх) .. 1 (вниз)
-            
-            // Правый стик: axes[2] = X, axes[3] = Y
-            this.controllerData.rightStickX = gamepad.axes[2] || 0;
-            this.controllerData.rightStickY = gamepad.axes[3] || 0;
-            
-            // Кнопки геймпада (стандартная Gamepad API нумерация для XInput):
-            // 0 = A, 1 = B, 2 = X, 3 = Y
-            // 4 = Left Bumper (LB), 5 = Right Bumper (RB)
-            // 6 = Left Trigger (LT), 7 = Right Trigger (RT)
-            // 8 = Left Stick Click, 9 = Right Stick Click
-            // 10 = Start, 11 = Select/Back
-            
-            // Но для некоторых контроллеров плечи могут быть на других индексах
-            // Проверяем и LB/RB и LT/RT на разных позициях
-            
-            // LB (Left Bumper) - бег - проверяем кнопку 4 (стандарт) или 6 (некоторые контроллеры)
-            this.controllerData.runButton = (gamepad.buttons[4]?.pressed || false) || (gamepad.buttons[6]?.pressed || false);
-            
-            // RT (Right Trigger) - огонь - проверяем кнопку 5 (стандарт) или 7
-            const rtValue = (gamepad.buttons[5]?.value !== undefined ? gamepad.buttons[5]?.value : 0) || (gamepad.buttons[7]?.value || 0);
-            const triggerPressed = rtValue > 0.5;
-            
-            // A (кнопка 0) - рестарт/начать
-            this.controllerData.aButton = gamepad.buttons[0]?.pressed || false;
-            
-            // B (кнопка 1) - перезарядка
-            this.controllerData.bButton = gamepad.buttons[1]?.pressed || false;
-            
-            // Отладочный вывод при нажатии LB (показываем каждые 500ms)
-            if (this.controllerData.runButton && !this.controllerData.lastRunDebug) {
-                console.log(`🎮 LB нажат: buttons[4]=${gamepad.buttons[4]?.pressed}, buttons[6]=${gamepad.buttons[6]?.pressed}`);
-                console.log(`🎮 Все кнопки:`, Array.from(gamepad.buttons).map((b, i) => `${i}:${b.pressed || b.value?.toFixed(2) || 'n/a'}`).join(', '));
+
+            // Определяем тип маппинга: XInput или DirectInput
+            // XInput: axes = [LSX, LS_Y, RS_X, RS_Y]
+            // DirectInput: порядок осей отличается, часто [LSX, LS_Y, RZ, RS_X, RS_Y, X] и т.д.
+            const isXInput = gamepad.mapping === 'standard' || gamepad.axes.length <= 4;
+            const axes = gamepad.axes;
+
+            if (isXInput) {
+                // Стандартный XInput маппинг
+                this.controllerData.leftStickX = axes[0] || 0;
+                this.controllerData.leftStickY = axes[1] || 0;
+                this.controllerData.rightStickX = axes[2] || 0;
+                this.controllerData.rightStickY = axes[3] || 0;
+            } else {
+                // DirectInput маппинг — ищем стики по размеру значений
+                // На Android DirectInput контроллеры могут иметь 6+ осей
+                // Типичные раскладки DI:
+                //   [0]=LS_X, [1]=LS_Y, [2]=Z/руль, [3]=RS_X, [4]=RS_Y, [5]=RX
+                //   Иногда: [0]=X, [1]=Y, [2]=RX, [3]=RY, [4]=Z, [5]=RZ
+                // Ищем пару осей с наибольшими значениями для левого и правого стика
+                const leftX = axes[0] || 0;
+                const leftY = axes[1] || 0;
+
+                // Правый стик в DirectInput обычно на позициях [3],[4] или [4],[5]
+                let rightX = 0, rightY = 0;
+                if (axes.length >= 5) {
+                    // Проверяем, похоже ли [3],[4] на стик (значения близки к -1..1)
+                    if (Math.abs(axes[3]) > 0.01 || Math.abs(axes[4]) > 0.01) {
+                        rightX = axes[3] || 0;
+                        rightY = axes[4] || 0;
+                    } else if (axes.length >= 6 && (Math.abs(axes[4]) > 0.01 || Math.abs(axes[5]) > 0.01)) {
+                        rightX = axes[4] || 0;
+                        rightY = axes[5] || 0;
+                    } else {
+                        // Fallback: берём [3],[4]
+                        rightX = axes[3] || 0;
+                        rightY = axes[4] || 0;
+                    }
+                } else if (axes.length >= 4) {
+                    rightX = axes[2] || 0;
+                    rightY = axes[3] || 0;
+                }
+
+                this.controllerData.leftStickX = leftX;
+                this.controllerData.leftStickY = leftY;
+                this.controllerData.rightStickX = rightX;
+                this.controllerData.rightStickY = rightY;
+            }
+
+            // Кнопки — пробуются все известные раскладки
+            const btns = gamepad.buttons;
+
+            // LB (Left Bumper) - бег
+            // XInput: btn[4], DirectInput: btn[4] или btn[9]
+            const runPressed = (btns[4]?.pressed || false) || (btns[6]?.pressed || false) || (btns[9]?.pressed || false);
+            this.controllerData.runButton = runPressed;
+
+            // RT (Right Trigger) - огонь
+            // XInput: btn[5] или btn[7], DirectInput: btn[5] или btn[10]
+            let rtValue = 0;
+            for (const idx of [5, 7, 10]) {
+                if (btns[idx]?.value !== undefined && btns[idx]?.value > 0) {
+                    rtValue = Math.max(rtValue, btns[idx].value);
+                }
+            }
+            const triggerPressed = rtValue > 0.5 || btns[5]?.pressed || btns[7]?.pressed || btns[10]?.pressed;
+
+            // A (кнопка 0) — рестарт
+            // XInput: [0], DirectInput: [0] или [12]
+            const aPressed = (btns[0]?.pressed || false) || (btns[12]?.pressed || false);
+            this.controllerData.aButton = aPressed;
+
+            // B (кнопка 1) — перезарядка
+            // XInput: [1], DirectInput: [1] или [13]
+            const bPressed = (btns[1]?.pressed || false) || (btns[13]?.pressed || false);
+            this.controllerData.bButton = bPressed;
+
+            // Отладочный вывод при нажатии LB
+            if (runPressed && !this.controllerData.lastRunDebug) {
+                console.log(`🎮 LB нажат`);
+                console.log(`🎮 All buttons:`, Array.from(btns).map((b, i) => `${i}:${b.pressed ? 'ON' : ('v=' + b.value?.toFixed(2) || 0)}`).join(', '));
+                console.log(`🎮 All axes:`, axes.map((a, i) => `${i}:${a.toFixed(3)}`).join(', '));
                 this.controllerData.lastRunDebug = true;
-            } else if (!this.controllerData.runButton) {
+            } else if (!runPressed) {
                 this.controllerData.lastRunDebug = false;
             }
-            
+
             // Обработка стрельбы от RT (только при нажатии, не при удержании)
             if (triggerPressed && !this.controllerData.lastShoot) {
                 this.controllerData.triggerButton = true;
                 this.shoot();
             }
             this.controllerData.lastShoot = triggerPressed;
-            
+
             // Обработка перезарядки от B (только при нажатии)
             if (this.controllerData.bButton && !this.controllerData.lastReload) {
                 this.reloadWeapon();
             }
             this.controllerData.lastReload = this.controllerData.bButton;
-            
+
             // Обработка перехода/респауна от A (в меню Game Over)
             if (this.isGameOver && this.controllerData.aButton && !this.controllerData.lastRestart) {
                 const timeSinceDeath = Date.now() - this.gameOverTime;
                 if (timeSinceDeath >= GAME_OVER_DELAY) {
                     if (this.gameOverIsWin) {
-                        // При победе - следующий уровень
                         this.nextLevel();
                     } else {
-                        // При смерти - респаун на том же уровне
                         this.respawnPlayer();
                     }
                 }
@@ -917,6 +968,14 @@ export class Game {
             this.controllerData.lastRestart = this.controllerData.aButton;
         } else {
             this.controllerData.connected = false;
+            this.controllerData.leftStickX = 0;
+            this.controllerData.leftStickY = 0;
+            this.controllerData.rightStickX = 0;
+            this.controllerData.rightStickY = 0;
+            this.controllerData.runButton = false;
+            this.controllerData.triggerButton = false;
+            this.controllerData.aButton = false;
+            this.controllerData.bButton = false;
             this.controllerData.lastShoot = false;
             this.controllerData.lastReload = false;
             this.controllerData.lastRestart = false;
