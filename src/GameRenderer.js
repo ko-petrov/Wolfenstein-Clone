@@ -114,7 +114,7 @@ export class GameRenderer {
         this.recoil = recoil;
     }
     
-    render(canvas, ctx, width, height, keys, player, weapon, map, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, enemies, loot, coins, coinsCollected, score, health, isGameOver, gameOverTime, gameOverWin, enemiesKilled, currentLevel = 1) {
+    render(canvas, ctx, width, height, keys, player, weapon, map, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, enemies, loot, coins, coinsCollected, score, health, isGameOver, gameOverTime, gameOverWin, enemiesKilled, currentLevel = 1, deltaTime = 5.56) {
         // Вычисляем смещение камеры для эффекта покачивания (Bobbing)
         let cameraBobY = 0;
         let cameraBobX = 0;
@@ -190,17 +190,17 @@ export class GameRenderer {
         // 7. Оружие
         this.renderWeapon(ctx, width, height, keys, player, weapon);
         
-        // 7.5. Обновляем тряску от урона (используем deltaTime для 180 FPS)
-        this.updateDamageShake(5.56);
+        // 7.5. Обновляем тряску от урона
+        this.updateDamageShake(deltaTime);
         
         // 7.55. Обновляем тряску от отдачи оружия
-        this.updateWeaponShake(5.56);
+        this.updateWeaponShake(deltaTime);
         
         // 7.56. Обновляем тряску от перезарядки
-        this.updateReloadShake(5.56);
+        this.updateReloadShake(deltaTime);
         
-        // 7.6. Виньетки (передаём deltaTime с дефолтным значением для 180 FPS)
-        this.drawVignettes(ctx, width, height, player, 5.56);
+        // 7.6. Виньетки
+        this.drawVignettes(ctx, width, height, player, deltaTime);
         
         // 8. Счётчик очков
         this.renderScore(ctx, width, coinsCollected);

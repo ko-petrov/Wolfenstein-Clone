@@ -307,7 +307,7 @@ export class Game {
         for (let i = 1; i < this.rooms.length; i++) {
             if (Math.random() < 0.4) {
                 const room = this.rooms[i];
-                const pos = this.findRandomPositionInRoom(room);
+                const pos = this.findRandomPositionInRoom(room, 0);
                 if (pos) {
                     const isLarge = Math.random() < 0.3;
                     this.loot.push({
@@ -327,7 +327,7 @@ export class Game {
             const numCoins = Math.floor(Math.random() * 2) + 1;
             
             for (let j = 0; j < numCoins; j++) {
-                const pos = this.findRandomPositionInRoom(room);
+                const pos = this.findRandomPositionInRoom(room, 0);
                 if (pos) {
                     // Для первой комнаты проверяем дистанцию от спавна игрока
                     if (i === 0 && pos.distToPlayer < TILE_SIZE * 2) {
@@ -1306,7 +1306,7 @@ export class Game {
         this.renderer.render(
             this.canvas, this.ctx, this.width, this.height, this.keys, this.player, this.weapon,
             this.MAP, TILE_SIZE, MAP_WIDTH, MAP_HEIGHT, this.enemies, this.loot, this.coins,
-            this.coinsCollected, 0, this.player.health, this.isGameOver, this.gameOverTime, this.gameOverIsWin, this.enemiesKilled, this.currentLevel
+            this.coinsCollected, 0, this.player.health, this.isGameOver, this.gameOverTime, this.gameOverIsWin, this.enemiesKilled, this.currentLevel, this.deltaTime
         );
         
         // Отрисовка тач-контроллера (джойстики и кнопки поверх игры)
